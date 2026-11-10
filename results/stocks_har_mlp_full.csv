@@ -1,0 +1,31 @@
+cutoff,features,model,mse
+2019-01-01,-,tomorrow = today,0.38601761038362725
+2019-01-01,base,HAR,0.291021467789658
+2019-01-01,base,MLP [8] (mean of seeds),0.2936909493629827
+2019-01-01,base,MLP [8] (ensemble),0.29262898171792556
+2019-01-01,base,"MLP [16, 16] (mean of seeds)",0.2945877443041251
+2019-01-01,base,"MLP [16, 16] (ensemble)",0.29231797028016726
+2019-01-01,base,"MLP [32, 32] (mean of seeds)",0.2927280785079498
+2019-01-01,base,"MLP [32, 32] (ensemble)",0.29166450427510154
+2019-01-01,base + market + jump,HAR,0.28314112818441683
+2019-01-01,base + market + jump,MLP [8] (mean of seeds),0.28636623204844214
+2019-01-01,base + market + jump,MLP [8] (ensemble),0.2848163333372808
+2019-01-01,base + market + jump,"MLP [16, 16] (mean of seeds)",0.2840506732752033
+2019-01-01,base + market + jump,"MLP [16, 16] (ensemble)",0.283113366635736
+2019-01-01,base + market + jump,"MLP [32, 32] (mean of seeds)",0.2868303674987369
+2019-01-01,base + market + jump,"MLP [32, 32] (ensemble)",0.28390483848013637
+2021-01-01,-,tomorrow = today,0.38172051304899957
+2021-01-01,base,HAR,0.28206794031996085
+2021-01-01,base,MLP [8] (mean of seeds),0.2860935071117719
+2021-01-01,base,MLP [8] (ensemble),0.2838347433117306
+2021-01-01,base,"MLP [16, 16] (mean of seeds)",0.2836897753627617
+2021-01-01,base,"MLP [16, 16] (ensemble)",0.28202163615129766
+2021-01-01,base,"MLP [32, 32] (mean of seeds)",0.28988090644928943
+2021-01-01,base,"MLP [32, 32] (ensemble)",0.2844481334507732
+2021-01-01,base + market + jump,HAR,0.27350749903089067
+2021-01-01,base + market + jump,MLP [8] (mean of seeds),0.2774682569066871
+2021-01-01,base + market + jump,MLP [8] (ensemble),0.2750136685390639
+2021-01-01,base + market + jump,"MLP [16, 16] (mean of seeds)",0.27601629632569413
+2021-01-01,base + market + jump,"MLP [16, 16] (ensemble)",0.27444030415732995
+2021-01-01,base + market + jump,"MLP [32, 32] (mean of seeds)",0.27541748470546584
+2021-01-01,base + market + jump,"MLP [32, 32] (ensemble)",0.27435161288239507
