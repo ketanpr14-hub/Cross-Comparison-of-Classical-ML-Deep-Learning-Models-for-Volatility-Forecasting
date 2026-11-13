@@ -1,17 +1,17 @@
 """
 Modelling and testing: run every model on one dataset and write a structured result folder.
 
-Run from the project root:
-    python -m src.econometrics.run --dataset stocks
-    python -m src.econometrics.run --dataset forex --split-policy expanding --refit-every 252
-    python -m src.econometrics.run --dataset stocks --quick          # 3 assets, to check the code
+Run from the code/ folder:
+    python -m econometrics.run --dataset stocks
+    python -m econometrics.run --dataset forex --split-policy expanding --refit-every 252
+    python -m econometrics.run --dataset stocks --quick          # 3 assets, to check the code
 
 Each run creates results/econometrics/<dataset>/<run id>/ with
     run_config.json        every setting of the run: dataset, time window, splitting policy,
                            hyperparameters, masked days, sample sizes, package versions
-    metrics.csv            one row per cutoff and model: QLIKE, log-MSE, DM vs benchmark, MCS
+    metrics.csv            one row per cutoff and model: QLIKE, MSE (log RV and RV), DM vs benchmark, MCS
     dm_qlike.csv           Diebold-Mariano statistic and p-value for every pair of models
-    per_asset_metrics.csv  QLIKE and log-MSE of each model on each asset
+    per_asset_metrics.csv  QLIKE and both MSE of each model on each asset
     params.csv             estimated parameters of every model / asset / fold
     forecasts.csv.gz       every forecast (not committed, see .gitignore)
 and adds one line to results/econometrics/runs.csv.
@@ -84,13 +84,14 @@ def evaluate_cutoff(panel, cutoff, cfg):
     keep = in_test & H.notna().all(axis=1) & LOGF.notna().all(axis=1)
     sample, H, LOGF = panel[keep], H[keep], LOGF[keep]
 
-    q, mse_log = ev.loss_tables(sample, H, LOGF)
+    q, mse_log, mse_rv = ev.loss_tables(sample, H, LOGF)
     daily = ev.daily_mean(q, sample["date"])
     dm = ev.dm_matrix(daily, cfg.dm_lags)
     mcs = ev.model_confidence_set(daily, cfg.mcs_size, cfg.mcs_reps, cfg.mcs_block, cfg.seed)
     by_asset = ev.dm_by_asset(q, sample, cfg.benchmark, cfg.dm_lags)
 
-    metrics = pd.DataFrame({"n_forecasts": len(sample), "qlike": q.mean(), "mse_log_rv": mse_log.mean()})
+    metrics = pd.DataFrame({"n_forecasts": len(sample), "qlike": q.mean(), "mse_log_rv": mse_log.mean(),
+                            "mse_rv": mse_rv.mean()})
     metrics["qlike_vs_benchmark_pct"] = 100 * (metrics["qlike"] / metrics.loc[cfg.benchmark, "qlike"] - 1)
     vs = dm[dm["model_b"] == cfg.benchmark].set_index("model_a")
     metrics["dm_stat_vs_benchmark"] = vs["dm_stat"]
@@ -100,7 +101,7 @@ def evaluate_cutoff(panel, cutoff, cfg):
     metrics.insert(0, "qlike_rank", np.arange(1, len(metrics) + 1))
     metrics.insert(0, "cutoff", cutoff)
 
-    per_asset = pd.concat({"qlike": q, "mse_log_rv": mse_log}, axis=1).groupby(sample["symbol"]).mean()
+    per_asset = pd.concat({"qlike": q, "mse_log_rv": mse_log, "mse_rv": mse_rv}, axis=1).groupby(sample["symbol"]).mean()
     per_asset = per_asset.stack(level=1, future_stack=True).rename_axis(["symbol", "model"]).reset_index()
     per_asset.insert(0, "cutoff", cutoff)
 
@@ -191,7 +192,7 @@ def main():
     if len(not_converged):
         print(f"\nwarning: {len(not_converged)} estimations did not converge (listed in run_config.json)")
     print(f"\nresults in {out.relative_to(ROOT)}   total time {time.time() - t0:.0f}s")
-    print(f"display them with: python -m src.econometrics.report --run {out.relative_to(ROOT).as_posix()}")
+    print(f"display them from code/ with: python -m econometrics.report --run {out.relative_to(ROOT).as_posix()}")
 
 
 if __name__ == "__main__":

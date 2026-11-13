@@ -1,7 +1,7 @@
 """
 Data cleaning and feature engineering.
 
-    python -m src.econometrics.data --dataset futures      # prints what the cleaning does
+    python -m econometrics.data --dataset futures      # prints what the cleaning does
 
 `build_panel` returns one row per asset-day, indexed like the other branches: the row of
 day t holds what is known at the close of t, and `target` is the log realized variance of

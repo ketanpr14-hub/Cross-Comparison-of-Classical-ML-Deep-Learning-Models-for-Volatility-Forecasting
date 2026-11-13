@@ -27,7 +27,8 @@ def loss_tables(sample, H, LOGF):
     """Per asset-day losses. `sample` has the target columns; H, LOGF the forecasts."""
     q = H.apply(lambda h: qlike(sample["target_rv"], h))
     mse_log = LOGF.apply(lambda f: (sample["target"] - f) ** 2)
-    return q, mse_log
+    mse_rv = H.apply(lambda h: (sample["target_rv"] - h) ** 2)
+    return q, mse_log, mse_rv
 
 
 def daily_mean(losses, dates):

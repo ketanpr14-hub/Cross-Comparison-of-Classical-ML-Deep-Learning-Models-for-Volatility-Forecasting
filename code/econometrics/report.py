@@ -1,9 +1,9 @@
 """
 Result display: tables and figures of one run.
 
-    python -m src.econometrics.report                       # latest run of every dataset
-    python -m src.econometrics.report --dataset stocks      # latest run of one dataset
-    python -m src.econometrics.report --run results/econometrics/stocks/<run id>
+    python -m econometrics.report                       # latest run of every dataset
+    python -m econometrics.report --dataset stocks      # latest run of one dataset
+    python -m econometrics.report --run results/econometrics/stocks/<run id>
 
 Writes into the run folder
     report.md                 settings, ranking table per cutoff, reading guide
@@ -132,7 +132,7 @@ def report(run_dir):
     columns = {"qlike_rank": "rank", "model": "model", "qlike": "QLIKE", "qlike_vs_benchmark_pct": "vs benchmark, %",
                "dm_stat_vs_benchmark": "DM stat", "dm_pvalue_vs_benchmark": "DM p-value",
                "assets_sig_better": "assets better", "assets_sig_worse": "assets worse",
-               "mcs_pvalue": "MCS p-value", "in_mcs": "in MCS", "mse_log_rv": "MSE log RV"}
+               "mcs_pvalue": "MCS p-value", "in_mcs": "in MCS", "mse_log_rv": "MSE log RV", "mse_rv": "MSE RV"}
     for split in cfg["splits"]:
         cutoff = split["cutoff"]
         table = metrics[metrics["cutoff"] == cutoff][list(columns)].rename(columns=columns)
@@ -142,9 +142,10 @@ def report(run_dir):
         lines += [f"## Test from {cutoff}", "",
                   f"{split['n_test_forecasts']:,} forecasts on {split['n_test_days']:,} days "
                   f"({split['test_first_origin']} to {split['test_last_origin']}), {split['n_folds']} estimation(s).", "",
-                  table.to_markdown(index=False, floatfmt=".4f").replace("nan", "   "), ""]
+                  table.to_markdown(index=False, floatfmt=[".4f"] * (table.shape[1] - 1) + [".3e"]).replace("nan", "   "), ""]
         print(f"\n{s['dataset']} | test from {cutoff} | {s['split_policy']} split")
-        print(table.to_string(index=False, float_format=lambda v: f"{v:.4f}", na_rep=""))
+        print(table.to_string(index=False, float_format=lambda v: f"{v:.4f}", na_rep="",
+                              formatters={"MSE RV": "{:.3e}".format}))
     lines += [
         "## How to read the table", "",
         "- **QLIKE** is the loss to minimize (0 = perfect forecast). Models are ranked on it.",
@@ -154,7 +155,10 @@ def report(run_dir):
         "than the benchmark at 5 % when the test is run asset by asset.",
         "- **in MCS**: the model belongs to the Model Confidence Set, the smallest group of models that contains the best one "
         "with the stated confidence. Models outside it are significantly worse than the best.",
-        "- **MSE log RV** is the criterion of the DL and foundation-model branches, on the same asset-days when the dataset is stocks.", "",
+        "- **MSE log RV** is the mean squared error on log(rv5), the criterion of the DL and foundation-model branches, "
+        "on the same asset-days when the dataset is stocks.",
+        "- **MSE RV** is the mean squared error on rv5 itself. A handful of crisis days carry most of it, "
+        "so it is much noisier than QLIKE.", "",
         "## Figures", "", "![QLIKE ranking](figures/qlike_ranking.png)", "", "![Diebold-Mariano matrix](figures/dm_matrix.png)", "",
     ]
     if has_path:

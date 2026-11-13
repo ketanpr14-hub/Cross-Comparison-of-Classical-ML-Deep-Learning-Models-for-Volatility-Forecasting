@@ -13,7 +13,7 @@ the numbers can be put in the same table.
 | Split | train before the cutoff, test after; cutoffs 2019-01-01 and 2021-01-01 |
 | Bad days | the 6 stock-days of Quentin's EDA are masked |
 | Main loss | QLIKE = `rv/h - log(rv/h) - 1`, where `h` is the variance forecast. It is a loss: **lower is better** |
-| Also reported | MSE on `log(rv5)`, the criterion of the other branches |
+| Also reported | MSE on `log(rv5)`, the criterion of the other branches, and MSE on `rv5` itself |
 | Model comparison | Diebold-Mariano tests and the Model Confidence Set, on the daily loss averaged across assets |
 
 On stocks the test sample is the one of `src/dl/stocks_har_mlp.py` (78,605 and 58,405
@@ -22,26 +22,27 @@ market + jump" and "tomorrow = today" MSE to four decimals.
 
 ## Run it
 
-Python 3.12. Put the three VOLARE folders under `data/` (they are not versioned), then
-from the project root:
+Python 3.12. Put the three VOLARE folders under `data/` at the project root (they are not
+versioned), then from the `code/` folder:
 
 ```sh
-python -m pip install -r src/econometrics/requirements.txt
+cd code
+python -m pip install -r econometrics/requirements.txt
 
-python -m src.econometrics.eda                        # EDA of the three files
-python -m src.econometrics.data --dataset futures     # what the cleaning step removes
-python -m src.econometrics.run --dataset stocks       # models + tests, about 30 s
-python -m src.econometrics.report                     # tables and figures of the latest runs
+python -m econometrics.eda                        # EDA of the three files
+python -m econometrics.data --dataset futures     # what the cleaning step removes
+python -m econometrics.run --dataset stocks       # models + tests, about 30 s
+python -m econometrics.report                     # tables and figures of the latest runs
 ```
 
 Other settings of `run` (all are saved with the results; `--help` lists them):
 
 ```sh
-python -m src.econometrics.run --dataset forex --split-policy expanding --refit-every 252
-python -m src.econometrics.run --dataset futures --split-policy rolling --window 1500
-python -m src.econometrics.run --dataset stocks --start 2018-01-01 --cutoffs 2023-01-01
-python -m src.econometrics.run --dataset stocks --models RW GARCH logHAR --garch-dist t
-python -m src.econometrics.run --dataset stocks --quick      # 3 assets, to check the code
+python -m econometrics.run --dataset forex --split-policy expanding --refit-every 252
+python -m econometrics.run --dataset futures --split-policy rolling --window 1500
+python -m econometrics.run --dataset stocks --start 2018-01-01 --cutoffs 2023-01-01
+python -m econometrics.run --dataset stocks --models RW GARCH logHAR --garch-dist t
+python -m econometrics.run --dataset stocks --quick      # 3 assets, to check the code
 ```
 
 ## Files
@@ -87,9 +88,9 @@ rolled through the test days.
 | File | Content |
 |---|---|
 | `run_config.json` | dataset, time window, splitting policy, hyperparameters, masked days, sample sizes, non-converged fits, package versions, git commit |
-| `metrics.csv` | per cutoff and model: QLIKE, rank, log-MSE, DM test against the benchmark, number of assets significantly better / worse, MCS p-value and membership |
+| `metrics.csv` | per cutoff and model: QLIKE, rank, MSE on log RV (`mse_log_rv`) and on RV (`mse_rv`), DM test against the benchmark, number of assets significantly better / worse, MCS p-value and membership |
 | `dm_qlike.csv` | DM statistic and p-value for every pair of models |
-| `per_asset_metrics.csv` | QLIKE and log-MSE of every model on every asset |
+| `per_asset_metrics.csv` | QLIKE and both MSE of every model on every asset |
 | `params.csv` | estimated parameters of every model, asset and fold |
 | `report.md`, `figures/` | written by `report.py` |
 | `forecasts.csv.gz` | every forecast; not versioned |
@@ -135,4 +136,6 @@ QLIKE of the best model, of the benchmark and of the best return-based model:
   8 % below `rv5` on average for stocks and forex. Their forecasts are not rescaled.
 - HARQ stays in the futures Model Confidence Set despite a poor QLIKE: its loss comes
   from a few very large errors, so the test cannot reject it. It is not a good model there.
+- The MSE on `rv5` is dominated by a few crisis days. On stocks from 2019, EGARCH has an MSE
+  about 60 times that of the other models because its forecast explodes on a few days of 2020.
 - With 5 assets, the forex and futures tests have much less power than the stocks tests.

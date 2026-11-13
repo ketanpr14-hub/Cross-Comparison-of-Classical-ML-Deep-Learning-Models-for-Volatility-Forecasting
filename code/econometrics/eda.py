@@ -1,7 +1,7 @@
 """
 Exploratory analysis of one dataset, aimed at the modelling choices of the pipeline.
 
-    python -m src.econometrics.eda --dataset stocks        # or forex, futures, all
+    python -m econometrics.eda --dataset stocks        # or forex, futures, all
 
 Writes to results/econometrics/eda/<dataset>/
     summary_by_asset.csv     level, dispersion and memory of volatility, asset by asset

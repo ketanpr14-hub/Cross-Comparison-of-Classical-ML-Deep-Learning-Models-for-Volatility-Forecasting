@@ -1,7 +1,7 @@
 {
-  "run_id": "20261113-194058_fixed",
-  "created": "2026-11-13T19:40:59",
-  "runtime_seconds": 10.9,
+  "run_id": "20261113-210119_fixed",
+  "created": "2026-11-13T21:01:21",
+  "runtime_seconds": 19.0,
   "settings": {
     "dataset": "futures",
     "start": null,
@@ -310,7 +310,7 @@
   "models_not_converged": [],
   "environment": {
     "python": "3.12.10",
-    "git_commit": "80dc556",
+    "git_commit": "266fffe",
     "numpy": "2.5.4",
     "pandas": "3.1.1",
     "scipy": "1.18.1",
