@@ -1,0 +1,108 @@
+{
+  "run_id": "20261113-194042_fixed",
+  "created": "2026-11-13T19:40:43",
+  "runtime_seconds": 11.3,
+  "settings": {
+    "dataset": "forex",
+    "start": null,
+    "end": null,
+    "symbols": null,
+    "cutoffs": [
+      "2019-01-01",
+      "2021-01-01"
+    ],
+    "split_policy": "fixed",
+    "refit_every": 252,
+    "window": 1000,
+    "models": [
+      "RW",
+      "EWMA",
+      "EWMA-RV",
+      "ARCH",
+      "GARCH",
+      "GJR-GARCH",
+      "EGARCH",
+      "HAR",
+      "HARQ",
+      "logHAR",
+      "logHAR-MJ",
+      "logSHAR",
+      "MEM",
+      "AMEM"
+    ],
+    "ewma_lambda": 0.94,
+    "arch_p": 5,
+    "garch_dist": "normal",
+    "har_pooling": "pooled",
+    "har_lags": [
+      5,
+      22
+    ],
+    "min_train": 500,
+    "benchmark": "logHAR",
+    "dm_lags": null,
+    "mcs_size": 0.1,
+    "mcs_reps": 2000,
+    "mcs_block": 10,
+    "seed": 0,
+    "n_jobs": -1,
+    "quick": false
+  },
+  "data": {
+    "file": "data/realized_variance_forex_20261030/realized_variance_forex_20261030.csv",
+    "first_date": "2009-09-25",
+    "last_date": "2026-10-30",
+    "n_assets": 5,
+    "assets": [
+      "AUDUSD",
+      "EURUSD",
+      "GBPUSD",
+      "USDCAD",
+      "USDJPY"
+    ],
+    "n_rows": 22178,
+    "target": "log(rv5) of the next session; QLIKE is scored on rv5 itself",
+    "returns": "open-to-close log return",
+    "masked_asset_days": []
+  },
+  "splits": [
+    {
+      "cutoff": "2019-01-01",
+      "n_folds": 1,
+      "train_start": "2009-09-25",
+      "test_first_origin": "2019-01-02",
+      "test_last_origin": "2026-10-29",
+      "n_test_days": 2032,
+      "n_test_forecasts": 10160,
+      "n_train_rows_before_cutoff": 12013,
+      "test_rows_without_forecast_by_model": {}
+    },
+    {
+      "cutoff": "2021-01-01",
+      "n_folds": 1,
+      "train_start": "2009-09-25",
+      "test_first_origin": "2021-01-04",
+      "test_last_origin": "2026-10-29",
+      "n_test_days": 1513,
+      "n_test_forecasts": 7565,
+      "n_train_rows_before_cutoff": 14608,
+      "test_rows_without_forecast_by_model": {}
+    }
+  ],
+  "testing": {
+    "main_loss": "QLIKE = rv/h - log(rv/h) - 1 (lower is better)",
+    "common_sample": "every model is scored on the same asset-days",
+    "tests_on": "daily loss averaged across assets",
+    "dm": "two-sided Diebold-Mariano, Newey-West variance, negative = better than benchmark",
+    "mcs": "Hansen-Lunde-Nason, range statistic, stationary bootstrap"
+  },
+  "models_not_converged": [],
+  "environment": {
+    "python": "3.12.10",
+    "git_commit": "80dc556",
+    "numpy": "2.5.4",
+    "pandas": "3.1.1",
+    "scipy": "1.18.1",
+    "arch": "9.0.0"
+  }
+}

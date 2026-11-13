@@ -1,0 +1,204 @@
+{
+  "run_id": "20261113-194135_expanding",
+  "created": "2026-11-13T19:41:47",
+  "runtime_seconds": 43.2,
+  "settings": {
+    "dataset": "stocks",
+    "start": null,
+    "end": null,
+    "symbols": null,
+    "cutoffs": [
+      "2019-01-01",
+      "2021-01-01"
+    ],
+    "split_policy": "expanding",
+    "refit_every": 252,
+    "window": 1000,
+    "models": [
+      "RW",
+      "EWMA",
+      "EWMA-RV",
+      "ARCH",
+      "GARCH",
+      "GJR-GARCH",
+      "EGARCH",
+      "HAR",
+      "HARQ",
+      "logHAR",
+      "logHAR-MJ",
+      "logSHAR",
+      "MEM",
+      "AMEM"
+    ],
+    "ewma_lambda": 0.94,
+    "arch_p": 5,
+    "garch_dist": "normal",
+    "har_pooling": "pooled",
+    "har_lags": [
+      5,
+      22
+    ],
+    "min_train": 500,
+    "benchmark": "logHAR",
+    "dm_lags": null,
+    "mcs_size": 0.1,
+    "mcs_reps": 2000,
+    "mcs_block": 10,
+    "seed": 0,
+    "n_jobs": -1,
+    "quick": false
+  },
+  "data": {
+    "file": "data/realized_variance_stocks_20261030/realized_variance_stocks_20261030.csv",
+    "first_date": "2015-01-02",
+    "last_date": "2026-10-30",
+    "n_assets": 40,
+    "assets": [
+      "AAPL",
+      "ADBE",
+      "AMD",
+      "AMGN",
+      "AMZN",
+      "AXP",
+      "BA",
+      "CAT",
+      "CRM",
+      "CSCO",
+      "CVX",
+      "DIS",
+      "GE",
+      "GOOGL",
+      "GS",
+      "HD",
+      "HON",
+      "IBM",
+      "JNJ",
+      "JPM",
+      "KO",
+      "MCD",
+      "META",
+      "MMM",
+      "MRK",
+      "MSFT",
+      "NFLX",
+      "NKE",
+      "NVDA",
+      "ORCL",
+      "PG",
+      "PM",
+      "SHW",
+      "TRV",
+      "TSLA",
+      "UNH",
+      "V",
+      "VZ",
+      "WMT",
+      "XOM"
+    ],
+    "n_rows": 119000,
+    "target": "log(rv5) of the next session; QLIKE is scored on rv5 itself",
+    "returns": "open-to-close log return",
+    "masked_asset_days": [
+      {
+        "date": "2023-01-24",
+        "symbol": "MCD",
+        "reason": "listed bad day"
+      },
+      {
+        "date": "2023-01-24",
+        "symbol": "NKE",
+        "reason": "listed bad day"
+      },
+      {
+        "date": "2016-09-27",
+        "symbol": "PG",
+        "reason": "listed bad day"
+      },
+      {
+        "date": "2023-01-24",
+        "symbol": "V",
+        "reason": "listed bad day"
+      },
+      {
+        "date": "2023-01-24",
+        "symbol": "WMT",
+        "reason": "listed bad day"
+      },
+      {
+        "date": "2023-01-24",
+        "symbol": "XOM",
+        "reason": "listed bad day"
+      }
+    ]
+  },
+  "splits": [
+    {
+      "cutoff": "2019-01-01",
+      "n_folds": 8,
+      "train_start": "2015-01-02",
+      "test_first_origin": "2019-01-02",
+      "test_last_origin": "2026-10-29",
+      "n_test_days": 1968,
+      "n_test_forecasts": 78605,
+      "n_train_rows_before_cutoff": 40240,
+      "test_rows_without_forecast_by_model": {
+        "RW": 5,
+        "EWMA": 5,
+        "EWMA-RV": 5,
+        "ARCH": 5,
+        "GARCH": 5,
+        "GJR-GARCH": 5,
+        "EGARCH": 5,
+        "HAR": 110,
+        "HARQ": 110,
+        "logHAR": 110,
+        "logHAR-MJ": 110,
+        "logSHAR": 110,
+        "MEM": 5,
+        "AMEM": 5
+      }
+    },
+    {
+      "cutoff": "2021-01-01",
+      "n_folds": 6,
+      "train_start": "2015-01-02",
+      "test_first_origin": "2021-01-04",
+      "test_last_origin": "2026-10-29",
+      "n_test_days": 1463,
+      "n_test_forecasts": 58405,
+      "n_train_rows_before_cutoff": 60440,
+      "test_rows_without_forecast_by_model": {
+        "RW": 5,
+        "EWMA": 5,
+        "EWMA-RV": 5,
+        "ARCH": 5,
+        "GARCH": 5,
+        "GJR-GARCH": 5,
+        "EGARCH": 5,
+        "HAR": 110,
+        "HARQ": 110,
+        "logHAR": 110,
+        "logHAR-MJ": 110,
+        "logSHAR": 110,
+        "MEM": 5,
+        "AMEM": 5
+      }
+    }
+  ],
+  "testing": {
+    "main_loss": "QLIKE = rv/h - log(rv/h) - 1 (lower is better)",
+    "common_sample": "every model is scored on the same asset-days",
+    "tests_on": "daily loss averaged across assets",
+    "dm": "two-sided Diebold-Mariano, Newey-West variance, negative = better than benchmark",
+    "mcs": "Hansen-Lunde-Nason, range statistic, stationary bootstrap"
+  },
+  "models_not_converged": [],
+  "environment": {
+    "python": "3.12.10",
+    "git_commit": "80dc556",
+    "numpy": "2.5.4",
+    "pandas": "3.1.1",
+    "scipy": "1.18.1",
+    "arch": "9.0.0"
+  }
+}

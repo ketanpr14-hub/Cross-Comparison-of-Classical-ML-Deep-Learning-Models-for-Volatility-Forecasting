@@ -1,0 +1,5 @@
+run_id,dataset,first_date,last_date,n_assets,split_policy,refit_every,window,cutoffs,n_models,har_pooling,garch_dist,quick,best_model,folder
+20261113-194018_fixed,stocks,2015-01-02,2026-10-30,40,fixed,252,1000,2019-01-01 2021-01-01,14,pooled,normal,False,2019-01-01: logHAR-MJ (0.1818) | 2021-01-01: logHAR-MJ (0.1772),results/econometrics/stocks/20261113-194018_fixed
+20261113-194042_fixed,forex,2009-09-25,2026-10-30,5,fixed,252,1000,2019-01-01 2021-01-01,14,pooled,normal,False,2019-01-01: logSHAR (0.1527) | 2021-01-01: logSHAR (0.1569),results/econometrics/forex/20261113-194042_fixed
+20261113-194058_fixed,futures,2009-09-28,2026-10-30,5,fixed,252,1000,2019-01-01 2021-01-01,14,pooled,normal,False,2019-01-01: AMEM (0.1683) | 2021-01-01: AMEM (0.1685),results/econometrics/futures/20261113-194058_fixed
+20261113-194135_expanding,stocks,2015-01-02,2026-10-30,40,expanding,252,1000,2019-01-01 2021-01-01,14,pooled,normal,False,2019-01-01: logHAR-MJ (0.1825) | 2021-01-01: logHAR-MJ (0.1772),results/econometrics/stocks/20261113-194135_expanding
