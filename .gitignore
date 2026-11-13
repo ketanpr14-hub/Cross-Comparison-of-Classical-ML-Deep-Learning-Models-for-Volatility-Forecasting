@@ -1,0 +1,6 @@
+# VOLARE files are not versioned (same rule as the other branches): put them under data/
+data/
+.venv/
+__pycache__/
+# every forecast of a run: large, and rebuilt by `python -m src.econometrics.run`
+forecasts.csv.gz
