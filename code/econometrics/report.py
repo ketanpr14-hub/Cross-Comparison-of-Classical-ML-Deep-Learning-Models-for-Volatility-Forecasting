@@ -22,10 +22,9 @@ from .config import DATASETS, RESULTS_DIR, ROOT
 from .plots import BLUE, DIVERGING, GREY, LIGHT_GREY, ORANGE, TEXT, TEXT_2, plt, save, use_style
 
 
-def latest_run(dataset):
-    runs = sorted(p for p in (RESULTS_DIR / dataset).glob("*") if (p / "metrics.csv").exists()
-                  and not p.name.endswith("_quick"))
-    return runs[-1] if runs else None
+def all_runs(dataset):
+    return [p for p in sorted((RESULTS_DIR / dataset).glob("*"))
+            if (p / "metrics.csv").exists() and not p.name.endswith("_quick")]
 
 
 def ranking_figure(metrics, cfg, out):
@@ -124,8 +123,10 @@ def report(run_dir):
         f"{len(d['masked_asset_days'])} masked)",
         f"- **Target**: {d['target']}",
         f"- **Splitting policy**: {policy[s['split_policy']]}; test cutoffs {', '.join(s['cutoffs'])}",
-        f"- **Hyperparameters**: EWMA lambda {s['ewma_lambda']}, ARCH order {s['arch_p']}, GARCH errors {s['garch_dist']}, "
-        f"HAR estimation {s['har_pooling']} with lags 1/{s['har_lags'][0]}/{s['har_lags'][1]}",
+        "- **Hyperparameters**: " + (
+            f"selected by QLIKE on {s['tune_years']} validation year(s) before each cutoff, then the model is "
+            "re-estimated on the whole training period (values in the tables below)" if s.get("tune") else
+            "default values, no tuning (values in the tables below)"),
         f"- **Tests**: benchmark {s['benchmark']}; Model Confidence Set at {round(100 * (1 - s['mcs_size']))} % "
         f"({s['mcs_reps']} stationary-bootstrap draws, mean block {s['mcs_block']} days)", "",
     ]
@@ -143,6 +144,18 @@ def report(run_dir):
                   f"{split['n_test_forecasts']:,} forecasts on {split['n_test_days']:,} days "
                   f"({split['test_first_origin']} to {split['test_last_origin']}), {split['n_folds']} estimation(s).", "",
                   table.to_markdown(index=False, floatfmt=[".4f"] * (table.shape[1] - 1) + [".3e"]).replace("nan", "   "), ""]
+        chosen = pd.DataFrame([{"model": m, "hyperparameters": ", ".join(f"{k} = {v}" for k, v in hp.items()) or "none"}
+                               for m, hp in split.get("hyperparameters", {}).items()],
+                              columns=["model", "hyperparameters"])
+        if (run_dir / "tuning.csv").exists():
+            tuning = pd.read_csv(run_dir / "tuning.csv", dtype={"cutoff": str})
+            tuning = tuning[tuning["cutoff"] == cutoff]
+            best = tuning[tuning["selected"]].set_index("model")["validation_qlike"]
+            default = tuning[tuning["is_default"]].set_index("model")["validation_qlike"]
+            chosen["candidates"] = chosen["model"].map(tuning.groupby("model").size()).fillna(1).astype(int)
+            chosen["validation QLIKE"] = chosen["model"].map(best)
+            chosen["with default values"] = chosen["model"].map(default)
+        lines += ["Hyperparameters used:", "", chosen.to_markdown(index=False, floatfmt=".4f").replace("nan", "   "), ""]
         print(f"\n{s['dataset']} | test from {cutoff} | {s['split_policy']} split")
         print(table.to_string(index=False, float_format=lambda v: f"{v:.4f}", na_rep="",
                               formatters={"MSE RV": "{:.3e}".format}))
@@ -171,13 +184,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--run", help="run folder; default = latest run")
     parser.add_argument("--dataset", choices=list(DATASETS), help="latest run of this dataset")
+    parser.add_argument("--all", action="store_true", help="every run instead of the latest one")
     args = parser.parse_args()
     if args.run:
         report(args.run)
     else:
         for name in ([args.dataset] if args.dataset else DATASETS):
-            run = latest_run(name)
-            if run:
+            runs = all_runs(name)
+            for run in (runs if args.all else runs[-1:]):
                 report(run)
-            else:
+            if not runs:
                 print(f"no run found for {name}")

@@ -62,12 +62,17 @@ class RunConfig:
     window: int = 1000                    # training length in trading days (rolling)
     # ---- models and hyperparameters
     models: list[str] = field(default_factory=lambda: list(ALL_MODELS))
+    # The four values below are the defaults. With tune=True they are replaced by the
+    # values selected on the validation years.
     ewma_lambda: float = 0.94             # RiskMetrics decay of EWMA on squared returns
     arch_p: int = 5                       # order of the ARCH(p) model
     garch_dist: str = "normal"            # normal (QMLE) | t
     har_pooling: str = "pooled"           # pooled (one regression for all assets) | per_asset
     har_lags: tuple[int, int] = (5, 22)   # weekly and monthly windows
-    min_train: int = 500                  # minimum observations to estimate a per-asset model
+    min_train: int = 400                  # minimum observations to estimate a per-asset model
+    # ---- hyperparameter tuning (see tuning.py)
+    tune: bool = True                     # False = keep the textbook values above
+    tune_years: int = 2                   # one-year validation blocks taken before the cutoff
     # ---- testing
     benchmark: str = "logHAR"             # reference model of the Diebold-Mariano columns
     dm_lags: int | None = None            # HAC lags (None = floor(T^(1/3)))

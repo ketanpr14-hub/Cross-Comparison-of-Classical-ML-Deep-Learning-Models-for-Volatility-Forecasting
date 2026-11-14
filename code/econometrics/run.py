@@ -4,7 +4,12 @@ Modelling and testing: run every model on one dataset and write a structured res
 Run from the code/ folder:
     python -m econometrics.run --dataset stocks
     python -m econometrics.run --dataset forex --split-policy expanding --refit-every 252
+    python -m econometrics.run --dataset stocks --no-tune        # textbook hyperparameters
     python -m econometrics.run --dataset stocks --quick          # 3 assets, to check the code
+
+Hyperparameters are tuned by default on validation years taken before each cutoff
+(see tuning.py). --ewma-lambda, --arch-p, --garch-dist and --har-pooling set the values
+used with --no-tune.
 
 Each run creates results/econometrics/<dataset>/<run id>/ with
     run_config.json        every setting of the run: dataset, time window, splitting policy,
@@ -13,6 +18,7 @@ Each run creates results/econometrics/<dataset>/<run id>/ with
     dm_qlike.csv           Diebold-Mariano statistic and p-value for every pair of models
     per_asset_metrics.csv  QLIKE and both MSE of each model on each asset
     params.csv             estimated parameters of every model / asset / fold
+    tuning.csv             every hyperparameter candidate, its validation QLIKE, the one selected
     forecasts.csv.gz       every forecast (not committed, see .gitignore)
 and adds one line to results/econometrics/runs.csv.
 """
@@ -30,7 +36,8 @@ import pandas as pd
 from . import evaluation as ev
 from .config import ALL_MODELS, CUTOFFS, DATASETS, RESULTS_DIR, ROOT, RunConfig
 from .data import build_panel
-from .models import make_folds, run_models
+from .models import default_hyper, make_folds, run_models
+from .tuning import tune
 
 
 def parse_args():
@@ -49,6 +56,8 @@ def parse_args():
     p.add_argument("--arch-p", type=int, default=d.arch_p)
     p.add_argument("--garch-dist", choices=["normal", "t"], default=d.garch_dist)
     p.add_argument("--har-pooling", choices=["pooled", "per_asset"], default=d.har_pooling)
+    p.add_argument("--no-tune", dest="tune", action="store_false", help="keep the default hyperparameters")
+    p.add_argument("--tune-years", type=int, default=d.tune_years, help="number of one-year validation blocks")
     p.add_argument("--benchmark", default=d.benchmark)
     p.add_argument("--mcs-size", type=float, default=d.mcs_size)
     p.add_argument("--mcs-reps", type=int, default=d.mcs_reps)
@@ -77,7 +86,8 @@ def git_commit():
 def evaluate_cutoff(panel, cutoff, cfg):
     """Forecast, then score every model on the same asset-days."""
     folds = make_folds(panel["date"], cutoff, cfg)
-    H, LOGF, params = run_models(panel, folds, cfg)
+    hyper, tuning = tune(panel, cutoff, cfg) if cfg.tune else (default_hyper(cfg), pd.DataFrame())
+    H, LOGF, params = run_models(panel, folds, cfg, hyper)
 
     in_test = (panel["date"] >= cutoff) & panel["target_rv"].notna()
     missing = H[in_test].isna().sum()
@@ -115,10 +125,11 @@ def evaluate_cutoff(panel, cutoff, cfg):
         "n_test_days": int(sample["date"].nunique()), "n_test_forecasts": int(len(sample)),
         "n_train_rows_before_cutoff": int((panel["date"] < cutoff).sum()),
         "test_rows_without_forecast_by_model": {m: int(n) for m, n in missing.items() if n},
+        "hyperparameters": {m: hyper[m] for m in cfg.models},
     }
     dm.insert(0, "cutoff", cutoff)
     params.insert(0, "cutoff", cutoff)
-    return metrics, dm, per_asset, params, forecasts, info
+    return metrics, dm, per_asset, params, forecasts, info, tuning
 
 
 def main():
@@ -136,7 +147,10 @@ def main():
     metrics, dm, per_asset, params, forecasts = (pd.concat([o[i] for o in outputs], ignore_index=True)
                                                  for i in range(5))
 
-    run_id = datetime.now().strftime("%Y%m%d-%H%M%S") + f"_{cfg.split_policy}" + ("_quick" if cfg.quick else "")
+    tuning = pd.concat([o[6] for o in outputs], ignore_index=True)
+
+    run_id = datetime.now().strftime("%Y%m%d-%H%M%S") + f"_{cfg.split_policy}" \
+        + ("_tuned" if cfg.tune else "_default") + ("_quick" if cfg.quick else "")
     out = RESULTS_DIR / cfg.dataset / run_id
     out.mkdir(parents=True, exist_ok=True)
     metrics.to_csv(out / "metrics.csv", index=False)
@@ -144,6 +158,8 @@ def main():
     per_asset.to_csv(out / "per_asset_metrics.csv", index=False)
     params.to_csv(out / "params.csv", index=False)
     forecasts.to_csv(out / "forecasts.csv.gz", index=False)
+    if len(tuning):
+        tuning.to_csv(out / "tuning.csv", index=False)
 
     not_converged = params[~params["converged"].astype(bool)]
     run_config = {
@@ -162,6 +178,10 @@ def main():
                                   for r in mask_log.itertuples()],
         },
         "splits": [o[5] for o in outputs],
+        "tuning": ({"criterion": "QLIKE on the validation years, all assets together",
+                    "validation": f"{cfg.tune_years} one-year block(s) before each cutoff, then "
+                                  "re-estimation on the whole training period"}
+                   if cfg.tune else "none: default hyperparameters"),
         "testing": {
             "main_loss": "QLIKE = rv/h - log(rv/h) - 1 (lower is better)",
             "common_sample": "every model is scored on the same asset-days",
@@ -181,13 +201,18 @@ def main():
         "run_id": run_id, "dataset": cfg.dataset, "first_date": run_config["data"]["first_date"],
         "last_date": run_config["data"]["last_date"], "n_assets": run_config["data"]["n_assets"],
         "split_policy": cfg.split_policy, "refit_every": cfg.refit_every, "window": cfg.window,
-        "cutoffs": " ".join(cfg.cutoffs), "n_models": len(cfg.models), "har_pooling": cfg.har_pooling,
-        "garch_dist": cfg.garch_dist, "quick": cfg.quick,
+        "cutoffs": " ".join(cfg.cutoffs), "n_models": len(cfg.models), "tuned": cfg.tune, "quick": cfg.quick,
         "best_model": " | ".join(f"{r.cutoff}: {r.model} ({r.qlike:.4f})" for r in best.itertuples()),
         "folder": out.relative_to(ROOT).as_posix(),
     }])
     registry = RESULTS_DIR / "runs.csv"
-    line.to_csv(registry, mode="a", header=not registry.exists(), index=False)
+    if registry.exists():
+        # runs made before tuning existed have no `tuned` column: they used the defaults
+        previous = pd.read_csv(registry, dtype=str).drop(columns=["har_pooling", "garch_dist"], errors="ignore")
+        if "tuned" not in previous:
+            previous["tuned"] = "False"
+        line = pd.concat([previous, line.astype(str)], ignore_index=True)[line.columns]
+    line.to_csv(registry, index=False)
 
     if len(not_converged):
         print(f"\nwarning: {len(not_converged)} estimations did not converge (listed in run_config.json)")

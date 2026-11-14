@@ -92,40 +92,56 @@ def _ewma(x, lam, h0):
     return out
 
 
-def _arch_spec(name, cfg):
-    dist = {"normal": "normal", "t": "t"}[cfg.garch_dist]
+def default_hyper(cfg: RunConfig):
+    """Hyperparameters used when nothing is tuned (textbook values, set in RunConfig)."""
+    orders = {"p": 1, "q": 1}
+    regression = {"pooling": cfg.har_pooling}
     return {
-        "ARCH": dict(vol="ARCH", p=cfg.arch_p, dist=dist),
-        "GARCH": dict(vol="GARCH", p=1, q=1, dist=dist),
-        "GJR-GARCH": dict(vol="GARCH", p=1, o=1, q=1, dist=dist),
-        "EGARCH": dict(vol="EGARCH", p=1, o=1, q=1, dist=dist),
-        "MEM": dict(vol="GARCH", p=1, q=1, dist="normal"),
-        "AMEM": dict(vol="GARCH", p=1, o=1, q=1, dist="normal"),
-    }[name]
+        "RW": {}, "EWMA-RV": {},
+        "EWMA": {"lambda": cfg.ewma_lambda},
+        "ARCH": {"p": cfg.arch_p, "dist": cfg.garch_dist},
+        "GARCH": {**orders, "dist": cfg.garch_dist},
+        "GJR-GARCH": {**orders, "dist": cfg.garch_dist},
+        "EGARCH": {**orders, "dist": cfg.garch_dist},
+        "MEM": dict(orders), "AMEM": dict(orders),
+        "HAR": {**regression, "estimator": "ols"}, "HARQ": {**regression, "estimator": "ols"},
+        "logHAR": dict(regression), "logHAR-MJ": dict(regression), "logSHAR": dict(regression),
+    }
 
 
-def _asset_forecasts(symbol, dates, r, rv, folds, models, cfg):
-    """All per-asset models for one asset. `dates`, `r`, `rv` hold its valid days only."""
-    out = {m: np.full(len(rv), np.nan) for m in models}
+def _arch_spec(name, hp):
+    if name == "ARCH":
+        return dict(vol="ARCH", p=hp["p"], dist=hp["dist"])
+    return dict(vol="EGARCH" if name == "EGARCH" else "GARCH", p=hp["p"], q=hp["q"],
+                o=0 if name in ("GARCH", "MEM") else 1, dist=hp.get("dist", "normal"))
+
+
+def _asset_forecasts(symbol, dates, r, rv, folds, specs, cfg):
+    """
+    All per-asset models for one asset. `dates`, `r`, `rv` hold its valid days only.
+    `specs` maps a label to (model name, hyperparameters), so several versions of the
+    same model can be run at once when tuning.
+    """
+    out = {label: np.full(len(rv), np.nan) for label in specs}
     params = []
     for k, fold in enumerate(folds):
         i0, i1, i2 = (int(np.searchsorted(dates, np.datetime64(d)))
                       for d in (fold.train_start, fold.test_start, fold.test_end))
         if i1 - i0 < cfg.min_train or i2 <= i1:
             continue
-        for name in models:
-            row = {"model": name, "symbol": symbol, "fold": k, "n_train": i1 - i0}
+        for label, (name, hp) in specs.items():
+            row = {"model": label, "symbol": symbol, "fold": k, "n_train": i1 - i0}
             if name in ("EWMA", "EWMA-RV"):
                 x = (r ** 2 if name == "EWMA" else rv)[i0:i2]
                 h0 = x[:BURN_IN].mean()
-                lam = cfg.ewma_lambda
+                lam = hp.get("lambda")
                 if name == "EWMA-RV":
                     # choose lambda on the training days, with the loss used for testing
                     def loss(lam):
                         h = _ewma(x[:i1 - i0], lam, h0)
                         return qlike(rv[i0 + BURN_IN + 1:i1], h[BURN_IN:-1]).mean()
                     lam = minimize_scalar(loss, bounds=(0.01, 0.995), method="bounded").x
-                out[name][i1:i2] = _ewma(x, lam, h0)[i1 - i0:]
+                out[label][i1:i2] = _ewma(x, lam, h0)[i1 - i0:]
                 row.update(converged=True, **{"lambda": lam})
             else:
                 # Percent units keep the optimizer well scaled. The MEM is a GARCH on
@@ -139,10 +155,10 @@ def _asset_forecasts(symbol, dates, r, rv, folds, models, cfg):
                 try:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
-                        model = arch_model(x[:i2], mean="Zero", rescale=False, **_arch_spec(name, cfg))
+                        model = arch_model(x[:i2], mean="Zero", rescale=False, **_arch_spec(name, hp))
                         fit = model.fit(first_obs=i0, last_obs=i1, disp="off", show_warning=False)
                         forecast = fit.forecast(horizon=1, start=i1, reindex=False)
-                    out[name][i1:i2] = forecast.variance.to_numpy()[:, 0] / 1e4
+                    out[label][i1:i2] = forecast.variance.to_numpy()[:, 0] / 1e4
                     row.update(converged=fit.convergence_flag == 0, **fit.params.to_dict())
                 except Exception as error:                      # keep the run alive, report it
                     row.update(converged=False, error=str(error)[:200])
@@ -150,33 +166,35 @@ def _asset_forecasts(symbol, dates, r, rv, folds, models, cfg):
     return symbol, out, params
 
 
-def asset_models(panel, folds, models, cfg):
-    """Returns {model: Series of variance forecasts indexed like `panel`} and the parameters."""
+def asset_models(panel, folds, specs, cfg):
+    """Returns {label: Series of variance forecasts indexed like `panel`} and the parameters."""
     valid = panel[panel["r"].notna() & panel["rv"].notna()]
     jobs = [
         delayed(_asset_forecasts)(symbol, g["date"].to_numpy(), g["r"].to_numpy(),
-                                  g["rv"].to_numpy(), folds, models, cfg)
+                                  g["rv"].to_numpy(), folds, specs, cfg)
         for symbol, g in valid.groupby("symbol", sort=False)
     ]
     results = Parallel(n_jobs=cfg.n_jobs)(jobs)
     index = {symbol: g.index for symbol, g in valid.groupby("symbol", sort=False)}
     forecasts = {
         m: pd.concat([pd.Series(out[m], index=index[symbol]) for symbol, out, _ in results])
-        for m in models
+        for m in specs
     }
     params = [row for _, _, rows in results for row in rows]
     return forecasts, params
 
 
 # ------------------------------------------------------------------ regressions (HAR family)
-def _ols(X, y):
+def _ols(X, y, weights=None):
     X1 = np.column_stack([np.ones(len(X)), X])
-    beta = np.linalg.lstsq(X1, y, rcond=None)[0]
+    w = np.ones(len(y)) if weights is None else np.sqrt(weights / weights.mean())
+    beta = np.linalg.lstsq(X1 * w[:, None], y * w, rcond=None)[0]
     return beta, y - X1 @ beta
 
 
-def regression_model(panel, folds, name, cfg):
+def regression_model(panel, folds, name, hp, cfg, label=None):
     """Returns (variance forecast, log forecast or None, parameter rows)."""
+    label = label or name
     in_logs = name in LOG_MODELS
     features = (LOG_MODELS if in_logs else LEVEL_MODELS)[name]
     target = "target" if in_logs else "target_rv"
@@ -185,16 +203,19 @@ def regression_model(panel, folds, name, cfg):
     h = pd.Series(np.nan, index=panel.index)
     logf = pd.Series(np.nan, index=panel.index) if in_logs else None
     params = []
-    groups = [("pooled", slice(None))] if cfg.har_pooling == "pooled" else \
+    groups = [("pooled", slice(None))] if hp["pooling"] == "pooled" else \
              [(s, panel["symbol"] == s) for s in panel["symbol"].unique()]
     for k, fold in enumerate(folds):
         in_train = usable & (panel["date"] >= fold.train_start) & (panel["date"] < fold.test_start)
         in_test = has_x & (panel["date"] >= fold.test_start) & (panel["date"] < fold.test_end)
-        for label, rows in groups:
+        for group, rows in groups:
             train, test = panel.loc[rows][in_train[rows]], panel.loc[rows][in_test[rows]]
             if len(train) < cfg.min_train or test.empty:
                 continue
-            beta, resid = _ols(train[features].to_numpy(), train[target].to_numpy())
+            # Weighted least squares (levels only): a day with high variance is also a day
+            # with a noisy target, so it gets less weight (Clements & Preve, 2021).
+            weights = 1 / train["rv_day"].to_numpy() if hp.get("estimator") == "wls" else None
+            beta, resid = _ols(train[features].to_numpy(), train[target].to_numpy(), weights)
             pred = beta[0] + test[features].to_numpy() @ beta[1:]
             if in_logs:
                 logf.loc[test.index] = pred
@@ -206,7 +227,7 @@ def regression_model(panel, folds, name, cfg):
                 lo = test["symbol"].map(train.groupby("symbol")["rv"].min()).to_numpy()
                 hi = test["symbol"].map(train.groupby("symbol")["rv"].max()).to_numpy()
                 h.loc[test.index] = np.clip(pred, lo, hi)
-            params.append({"model": name, "symbol": label, "fold": k, "n_train": len(train),
+            params.append({"model": label, "symbol": group, "fold": k, "n_train": len(train),
                            "converged": True, "const": beta[0],
                            **dict(zip(features, beta[1:])),
                            **({"resid_var": resid.var()} if in_logs else {})})
@@ -214,27 +235,36 @@ def regression_model(panel, folds, name, cfg):
 
 
 # ------------------------------------------------------------------ everything
-def run_models(panel, folds, cfg: RunConfig):
-    """Returns variance forecasts H, log forecasts LOGF (both indexed like panel) and parameters."""
+def run_specs(panel, folds, specs, cfg: RunConfig):
+    """
+    `specs` maps a label to (model name, hyperparameters).
+    Returns variance forecasts H, log forecasts LOGF (both indexed like panel) and parameters.
+    """
     H, LOGF, params = {}, {}, []
-    per_asset = [m for m in cfg.models if m in ASSET_MODELS]
+    per_asset = {label: spec for label, spec in specs.items() if spec[0] in ASSET_MODELS}
     if per_asset:
         forecasts, rows = asset_models(panel, folds, per_asset, cfg)
         H.update(forecasts)
         params += rows
     in_test = (panel["date"] >= folds[0].test_start)
-    for name in cfg.models:
+    for label, (name, hp) in specs.items():
         if name == "RW":
-            H[name] = panel["rv"].where(in_test)
-            LOGF[name] = panel["y"].where(in_test)
+            H[label] = panel["rv"].where(in_test)
+            LOGF[label] = panel["y"].where(in_test)
         elif name in LOG_MODELS or name in LEVEL_MODELS:
-            H[name], logf, rows = regression_model(panel, folds, name, cfg)
+            H[label], logf, rows = regression_model(panel, folds, name, hp, cfg, label)
             params += rows
             if logf is not None:
-                LOGF[name] = logf
+                LOGF[label] = logf
         elif name not in ASSET_MODELS:
             raise ValueError(f"unknown model {name!r}")
-    H = pd.DataFrame(H).reindex(panel.index)[cfg.models]
+    H = pd.DataFrame(H).reindex(panel.index)[list(specs)]
     # Models that forecast the variance are scored in logs on log(forecast).
-    LOGF = pd.DataFrame({m: LOGF[m] if m in LOGF else np.log(H[m]) for m in cfg.models})
+    LOGF = pd.DataFrame({m: LOGF[m] if m in LOGF else np.log(H[m]) for m in specs})
     return H, LOGF, pd.DataFrame(params)
+
+
+def run_models(panel, folds, cfg: RunConfig, hyper=None):
+    """Every model of the run, with the given hyperparameters (default: those of RunConfig)."""
+    hyper = hyper or default_hyper(cfg)
+    return run_specs(panel, folds, {m: (m, hyper[m]) for m in cfg.models}, cfg)

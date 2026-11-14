@@ -31,7 +31,7 @@ python -m pip install -r econometrics/requirements.txt
 
 python -m econometrics.eda                        # EDA of the three files
 python -m econometrics.data --dataset futures     # what the cleaning step removes
-python -m econometrics.run --dataset stocks       # models + tests, about 30 s
+python -m econometrics.run --dataset stocks       # tuning + models + tests, about 3 min
 python -m econometrics.report                     # tables and figures of the latest runs
 ```
 
@@ -41,7 +41,9 @@ Other settings of `run` (all are saved with the results; `--help` lists them):
 python -m econometrics.run --dataset forex --split-policy expanding --refit-every 252
 python -m econometrics.run --dataset futures --split-policy rolling --window 1500
 python -m econometrics.run --dataset stocks --start 2018-01-01 --cutoffs 2023-01-01
-python -m econometrics.run --dataset stocks --models RW GARCH logHAR --garch-dist t
+python -m econometrics.run --dataset stocks --no-tune     # default hyperparameters, about 30 s
+python -m econometrics.run --dataset stocks --no-tune --models RW GARCH logHAR --garch-dist t
+python -m econometrics.run --dataset stocks --tune-years 1   # one validation year, as in the DL branch
 python -m econometrics.run --dataset stocks --quick      # 3 assets, to check the code
 ```
 
@@ -53,6 +55,7 @@ python -m econometrics.run --dataset stocks --quick      # 3 assets, to check th
 | `data.py` | cleaning (masked days) and feature engineering |
 | `models.py` | the models and the splitting policies |
 | `evaluation.py` | QLIKE, Diebold-Mariano, Model Confidence Set |
+| `tuning.py` | hyperparameter selection on validation years |
 | `run.py` | runs everything on one dataset and writes the result folder |
 | `report.py` | result display: `report.md` and figures for a run |
 | `config.py` | paths, cutoffs, masked days, default hyperparameters |
@@ -62,28 +65,59 @@ python -m econometrics.run --dataset stocks --quick      # 3 assets, to check th
 | Name | Uses | Description |
 |---|---|---|
 | `RW` | RV | tomorrow = today |
-| `EWMA` | returns | RiskMetrics smoothing of squared returns, lambda = 0.94 |
-| `ARCH` | returns | ARCH(5) |
-| `GARCH` | returns | GARCH(1,1) |
-| `GJR-GARCH` | returns | GARCH(1,1) with leverage |
-| `EGARCH` | returns | EGARCH(1,1) with leverage |
+| `EWMA` | returns | RiskMetrics smoothing of squared returns (default lambda = 0.94) |
+| `ARCH` | returns | ARCH(p) (default p = 5) |
+| `GARCH` | returns | GARCH(p,q) (default 1,1) |
+| `GJR-GARCH` | returns | GARCH(1,q) with leverage |
+| `EGARCH` | returns | EGARCH(1,q) with leverage |
 | `EWMA-RV` | RV | smoothing of realized variance, lambda chosen by QLIKE on the training days |
 | `HAR` | RV | Corsi (2009): daily, weekly and monthly averages, in levels |
 | `HARQ` | RV | Bollerslev, Patton & Quaedvlieg (2016): HAR corrected for measurement error |
 | `logHAR` | RV | HAR in logs, the benchmark of the tests |
 | `logHAR-MJ` | RV | logHAR + market-wide level + jump share |
 | `logSHAR` | RV | Patton & Sheppard (2015): the daily lag split into upside and downside variance |
-| `MEM` | RV | multiplicative error model (Engle, 2002): a GARCH(1,1) recursion on RV itself |
+| `MEM` | RV | multiplicative error model (Engle, 2002): a GARCH(p,q) recursion on RV itself |
 | `AMEM` | RV | MEM where a negative-return day raises tomorrow's variance more |
 
 Returns are open-to-close log returns. ARCH-type models and MEM are estimated asset by
-asset; the HAR regressions pool all assets (`--har-pooling per_asset` changes that).
+asset; the HAR regressions are estimated either on all assets together or asset by asset.
 Parameters are estimated on the training part only and then kept fixed while the model is
 rolled through the test days.
 
+## Hyperparameter tuning
+
+The DL branch keeps the last year before the cutoff as a validation set and stops training
+when the validation loss stops improving. These models have no training epochs, so there
+is nothing to stop early; the same validation idea is used to choose their hyperparameters
+(`tuning.py`):
+
+1. the two years before the cutoff are two validation blocks. For each block, every
+   candidate is estimated on the data before the block and forecasts the block;
+2. the candidate with the lowest QLIKE over both blocks, all assets together, is kept;
+3. the model is re-estimated with it on the whole training period and then tested.
+
+Nothing after the cutoff is used. One set of values is chosen per model and per cutoff.
+The grids are small, so every candidate is tried (no search library is needed):
+
+| Model | Candidates |
+|---|---|
+| `EWMA` | lambda in 0.80, 0.85, 0.90, 0.94, 0.97, 0.99 |
+| `ARCH` | p in 1, 3, 5, 10, 22; normal or Student-t errors |
+| `GARCH` | p and q in 1, 2; normal or Student-t errors |
+| `GJR-GARCH`, `EGARCH` | q in 1, 2; normal or Student-t errors |
+| `MEM`, `AMEM` | p and q in 1, 2 |
+| `HAR`, `HARQ` | pooled or per asset; OLS or weighted least squares (weight 1 / RV) |
+| `logHAR`, `logHAR-MJ`, `logSHAR` | pooled or per asset |
+
+`RW` has nothing to tune and `EWMA-RV` already fits its decay on the training days.
+`tuning.csv` lists every candidate with its validation QLIKE, and `report.md` shows the
+selected values next to the validation QLIKE of the default values. `--no-tune` skips
+this step and uses the defaults.
+
 ## Output of a run
 
-`results/econometrics/<dataset>/<date-time>_<split policy>/`
+`results/econometrics/<dataset>/<date-time>_<split policy>_<tuned or default>/`
+(the runs made before tuning existed have no suffix: they used the default values)
 
 | File | Content |
 |---|---|
@@ -92,34 +126,63 @@ rolled through the test days.
 | `dm_qlike.csv` | DM statistic and p-value for every pair of models |
 | `per_asset_metrics.csv` | QLIKE and both MSE of every model on every asset |
 | `params.csv` | estimated parameters of every model, asset and fold |
+| `tuning.csv` | every hyperparameter candidate, its validation QLIKE, whether it was selected |
 | `report.md`, `figures/` | written by `report.py` |
 | `forecasts.csv.gz` | every forecast; not versioned |
 
 `results/econometrics/runs.csv` has one line per run. `results/econometrics/eda/` holds
 the EDA output.
 
-## Results (fixed split, the protocol of the other branches)
+## Results (fixed split, tuned hyperparameters)
 
-QLIKE of the best model, of the benchmark and of the best return-based model:
+QLIKE of the best model, of the benchmark and of GARCH:
 
 | Dataset | Test from | Best model | QLIKE | logHAR | GARCH | Models in the 90 % MCS |
 |---|---|---|---|---|---|---|
-| stocks | 2019 | logHAR-MJ | 0.1818 | 0.1863 | 0.2830 | logHAR-MJ |
-| stocks | 2021 | logHAR-MJ | 0.1772 | 0.1813 | 0.2460 | logHAR-MJ |
-| forex | 2019 | logSHAR | 0.1527 | 0.1534 | 0.2018 | logSHAR, logHAR-MJ, logHAR, MEM, AMEM |
-| forex | 2021 | logSHAR | 0.1569 | 0.1576 | 0.1855 | logSHAR, logHAR-MJ, logHAR, MEM, AMEM |
-| futures | 2019 | AMEM | 0.1683 | 0.1723 | 0.2080 | AMEM, MEM, logSHAR, logHAR, logHAR-MJ, HARQ |
-| futures | 2021 | AMEM | 0.1685 | 0.1699 | 0.1936 | AMEM, logSHAR, MEM, logHAR, logHAR-MJ, HARQ |
+| stocks | 2019 | logHAR-MJ | 0.1811 | 0.1863 | 0.2724 | logHAR-MJ |
+| stocks | 2021 | logHAR-MJ | 0.1766 | 0.1813 | 0.2431 | logHAR-MJ |
+| forex | 2019 | logHAR-MJ | 0.1511 | 0.1534 | 0.2021 | logHAR-MJ, logSHAR, logHAR, AMEM, MEM, HARQ |
+| forex | 2021 | logHAR-MJ | 0.1555 | 0.1576 | 0.1847 | logHAR-MJ, HAR, logSHAR, logHAR, MEM, AMEM |
+| futures | 2019 | AMEM | 0.1674 | 0.1698 | 0.2115 | AMEM, logSHAR, logHAR-MJ, HARQ |
+| futures | 2021 | logSHAR | 0.1661 | 0.1680 | 0.1928 | logSHAR, AMEM, logHAR-MJ, HAR, MEM, HARQ |
 
 - The log-HAR variants and the MEM, which see intraday realized variance, beat every
-  return-based model on the three datasets. EWMA, ARCH and GARCH have a QLIKE 14 % to 92 % above logHAR, and the
-  difference is significant in every case.
-- On stocks, adding the market level and the jump share to logHAR lowers QLIKE by 2.2 %
-  to 2.5 %, and it is the only model left in the Model Confidence Set.
+  return-based model on the three datasets. EWMA, ARCH and GARCH have a QLIKE 15 % to 64 %
+  above logHAR, and the difference is significant in every case.
+- On stocks, adding the market level and the jump share to logHAR lowers QLIKE by 2.5 %
+  to 2.8 %, and it is the only model left in the Model Confidence Set.
 - On forex and futures (5 assets each) the log-HAR variants and the MEM cannot be told
-  apart: all stay in the Model Confidence Set.
-- HAR in levels is clearly worse than HAR in logs.
-- Re-estimating every year on an expanding window (stocks) gives the same ranking.
+  apart: most stay in the Model Confidence Set.
+- Re-estimating every year on an expanding window (stocks) gives the same first three
+  models and the same Model Confidence Set; QLIKE moves by less than 1 % for the log-HAR
+  variants and falls by 2 % to 7 % for the ARCH-type models.
+
+### What tuning changes
+
+Test QLIKE with tuned hyperparameters against the default ones (the reference runs of
+2026-11-13, kept in `results/`):
+
+| Model | Selected most often | Change in test QLIKE |
+|---|---|---|
+| `HAR` | weighted least squares | -2 % to -14 % |
+| `ARCH` | p = 10 or 22 instead of 5 | -9 % to -15 % |
+| `HARQ` | weighted least squares | -11 % to +1 % |
+| `GARCH`, `GJR-GARCH`, `EGARCH` | q = 2, Student-t errors on stocks | -6 % to +2 % |
+| `logHAR-MJ` | one regression per asset | -0.3 % to -2 % |
+| `MEM`, `AMEM` | p or q = 2 | -0.2 % to -1.5 % |
+| `logHAR`, `logSHAR` | pooled (the default) on stocks and forex, per asset on futures | 0 % to -2 % |
+| `EWMA` | lambda = 0.90 or 0.97 instead of 0.94 | 0 % to +11 % |
+
+- The ranking of the model families does not change. Tuning mostly helps the weak
+  models: HAR in levels estimated by weighted least squares ends between 1 % below and 4 % above
+  logHAR, against 6 % to 18 % above before.
+- The best models gain little (logHAR-MJ: 0.1818 to 0.1811 on stocks from 2019), because
+  they have almost nothing to tune.
+- EWMA gets worse on the test set in 5 cases out of 6: the lambda that was best on the
+  two validation years is not the best afterwards. The gain seen on validation is not
+  guaranteed out of sample.
+- On stocks before 2019, every EGARCH candidate has a validation QLIKE above 100 (its
+  forecast explodes on a few days), so its selection there is between bad options.
 
 ## What the cleaning does, and what to keep in mind
 
@@ -137,5 +200,6 @@ QLIKE of the best model, of the benchmark and of the best return-based model:
 - HARQ stays in the futures Model Confidence Set despite a poor QLIKE: its loss comes
   from a few very large errors, so the test cannot reject it. It is not a good model there.
 - The MSE on `rv5` is dominated by a few crisis days. On stocks from 2019, EGARCH has an MSE
-  about 60 times that of the other models because its forecast explodes on a few days of 2020.
+  about 2.6 times that of logHAR (60 times with the default hyperparameters) because its
+  forecast explodes on a few days of 2020.
 - With 5 assets, the forex and futures tests have much less power than the stocks tests.
