@@ -5,6 +5,7 @@ Run from the code/ folder:
     python -m econometrics.run --dataset stocks
     python -m econometrics.run --dataset forex --split-policy expanding --refit-every 252
     python -m econometrics.run --dataset stocks --no-tune        # textbook hyperparameters
+    python -m econometrics.run --dataset combined                # the three files as one panel
     python -m econometrics.run --dataset stocks --quick          # 3 assets, to check the code
 
 Hyperparameters are tuned by default on validation years taken before each cutoff
@@ -19,6 +20,7 @@ Each run creates results/econometrics/<dataset>/<run id>/ with
     per_asset_metrics.csv  QLIKE and both MSE of each model on each asset
     params.csv             estimated parameters of every model / asset / fold
     tuning.csv             every hyperparameter candidate, its validation QLIKE, the one selected
+    per_class_metrics.csv  combined dataset only: QLIKE and both MSE of each model on each asset class
     forecasts.csv.gz       every forecast (not committed, see .gitignore)
 and adds one line to results/econometrics/runs.csv.
 """
@@ -34,7 +36,7 @@ import numpy as np
 import pandas as pd
 
 from . import evaluation as ev
-from .config import ALL_MODELS, CUTOFFS, DATASETS, RESULTS_DIR, ROOT, RunConfig
+from .config import ALL_MODELS, COMBINED, CUTOFFS, DATASETS, RESULTS_DIR, ROOT, RunConfig
 from .data import build_panel
 from .models import default_hyper, make_folds, run_models
 from .tuning import tune
@@ -43,7 +45,8 @@ from .tuning import tune
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     d = RunConfig()
-    p.add_argument("--dataset", choices=list(DATASETS), default=d.dataset)
+    p.add_argument("--dataset", choices=[*DATASETS, COMBINED], default=d.dataset,
+                   help="combined = the three files stacked into one panel")
     p.add_argument("--start", help="first date kept, YYYY-MM-DD")
     p.add_argument("--end", help="last date kept, YYYY-MM-DD")
     p.add_argument("--symbols", nargs="+", help="subset of assets")
@@ -115,6 +118,11 @@ def evaluate_cutoff(panel, cutoff, cfg):
     per_asset = per_asset.stack(level=1, future_stack=True).rename_axis(["symbol", "model"]).reset_index()
     per_asset.insert(0, "cutoff", cutoff)
 
+    per_class = pd.concat({"qlike": q, "mse_log_rv": mse_log, "mse_rv": mse_rv}, axis=1).groupby(sample["asset_class"]).mean()
+    per_class = per_class.stack(level=1, future_stack=True).rename_axis(["asset_class", "model"]).reset_index()
+    per_class["n_forecasts"] = per_class["asset_class"].map(sample["asset_class"].value_counts())
+    per_class.insert(0, "cutoff", cutoff)
+
     forecasts = sample[["date", "symbol", "target_date", "target_rv"]].join(H)
     forecasts.insert(0, "cutoff", cutoff)
     info = {
@@ -129,7 +137,7 @@ def evaluate_cutoff(panel, cutoff, cfg):
     }
     dm.insert(0, "cutoff", cutoff)
     params.insert(0, "cutoff", cutoff)
-    return metrics, dm, per_asset, params, forecasts, info, tuning
+    return metrics, dm, per_asset, params, forecasts, info, tuning, per_class
 
 
 def main():
@@ -160,6 +168,8 @@ def main():
     forecasts.to_csv(out / "forecasts.csv.gz", index=False)
     if len(tuning):
         tuning.to_csv(out / "tuning.csv", index=False)
+    if cfg.dataset == COMBINED:
+        pd.concat([o[7] for o in outputs], ignore_index=True).to_csv(out / "per_class_metrics.csv", index=False)
 
     not_converged = params[~params["converged"].astype(bool)]
     run_config = {
@@ -168,7 +178,8 @@ def main():
         "runtime_seconds": round(time.time() - t0, 1),
         "settings": cfg.to_dict(),
         "data": {
-            "file": DATASETS[cfg.dataset].relative_to(ROOT).as_posix(),
+            "file": ", ".join(DATASETS[name].relative_to(ROOT).as_posix()
+                              for name in (DATASETS if cfg.dataset == COMBINED else [cfg.dataset])),
             "first_date": str(panel["date"].min().date()), "last_date": str(panel["date"].max().date()),
             "n_assets": int(panel["symbol"].nunique()), "assets": sorted(panel["symbol"].unique()),
             "n_rows": int(len(panel)),

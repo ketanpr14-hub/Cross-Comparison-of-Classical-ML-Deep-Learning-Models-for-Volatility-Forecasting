@@ -1,0 +1,502 @@
+{
+  "run_id": "20261114-182637_fixed_tuned",
+  "created": "2026-11-14T18:27:11",
+  "runtime_seconds": 271.8,
+  "settings": {
+    "dataset": "combined",
+    "start": null,
+    "end": null,
+    "symbols": null,
+    "cutoffs": [
+      "2019-01-01",
+      "2021-01-01"
+    ],
+    "split_policy": "fixed",
+    "refit_every": 252,
+    "window": 1000,
+    "models": [
+      "RW",
+      "EWMA",
+      "EWMA-RV",
+      "ARCH",
+      "GARCH",
+      "GJR-GARCH",
+      "EGARCH",
+      "HAR",
+      "HARQ",
+      "logHAR",
+      "logHAR-MJ",
+      "logSHAR",
+      "MEM",
+      "AMEM"
+    ],
+    "ewma_lambda": 0.94,
+    "arch_p": 5,
+    "garch_dist": "normal",
+    "har_pooling": "pooled",
+    "har_lags": [
+      5,
+      22
+    ],
+    "min_train": 400,
+    "tune": true,
+    "tune_years": 2,
+    "benchmark": "logHAR",
+    "dm_lags": null,
+    "mcs_size": 0.1,
+    "mcs_reps": 2000,
+    "mcs_block": 10,
+    "seed": 0,
+    "n_jobs": -1,
+    "quick": false
+  },
+  "data": {
+    "file": "data/realized_variance_stocks_20261030/realized_variance_stocks_20261030.csv, data/realized_variance_forex_20261030/realized_variance_forex_20261030.csv, data/realized_variance_futures_20261030/realized_variance_futures_20261030.csv",
+    "first_date": "2009-09-25",
+    "last_date": "2026-10-30",
+    "n_assets": 50,
+    "assets": [
+      "AAPL",
+      "ADBE",
+      "AMD",
+      "AMGN",
+      "AMZN",
+      "AUDUSD",
+      "AXP",
+      "BA",
+      "C",
+      "CAT",
+      "CL",
+      "CRM",
+      "CSCO",
+      "CVX",
+      "DIS",
+      "ES",
+      "EURUSD",
+      "GBPUSD",
+      "GC",
+      "GE",
+      "GOOGL",
+      "GS",
+      "HD",
+      "HON",
+      "IBM",
+      "JNJ",
+      "JPM",
+      "KO",
+      "MCD",
+      "META",
+      "MMM",
+      "MRK",
+      "MSFT",
+      "NFLX",
+      "NG",
+      "NKE",
+      "NVDA",
+      "ORCL",
+      "PG",
+      "PM",
+      "SHW",
+      "TRV",
+      "TSLA",
+      "UNH",
+      "USDCAD",
+      "USDJPY",
+      "V",
+      "VZ",
+      "WMT",
+      "XOM"
+    ],
+    "n_rows": 163206,
+    "target": "log(rv5) of the next session; QLIKE is scored on rv5 itself",
+    "returns": "open-to-close log return",
+    "masked_asset_days": [
+      {
+        "date": "2023-01-24",
+        "symbol": "MCD",
+        "reason": "listed bad day"
+      },
+      {
+        "date": "2023-01-24",
+        "symbol": "NKE",
+        "reason": "listed bad day"
+      },
+      {
+        "date": "2016-09-27",
+        "symbol": "PG",
+        "reason": "listed bad day"
+      },
+      {
+        "date": "2023-01-24",
+        "symbol": "V",
+        "reason": "listed bad day"
+      },
+      {
+        "date": "2023-01-24",
+        "symbol": "WMT",
+        "reason": "listed bad day"
+      },
+      {
+        "date": "2023-01-24",
+        "symbol": "XOM",
+        "reason": "listed bad day"
+      },
+      {
+        "date": "2010-01-12",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2010-07-14",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2010-10-08",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2011-03-31",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2012-01-12",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2013-03-28",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2013-05-14",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2017-01-02",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2017-08-21",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2017-11-21",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2018-04-18",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2018-08-21",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2019-11-18",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2020-08-19",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2023-04-18",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2023-11-20",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2024-08-20",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2025-08-19",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2026-01-12",
+        "symbol": "C",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2020-04-16",
+        "symbol": "CL",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2009-09-29",
+        "symbol": "GC",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2009-10-15",
+        "symbol": "GC",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2009-12-29",
+        "symbol": "GC",
+        "reason": "listed bad day"
+      },
+      {
+        "date": "2010-02-15",
+        "symbol": "GC",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2009-09-28",
+        "symbol": "NG",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2009-10-28",
+        "symbol": "NG",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2010-10-27",
+        "symbol": "NG",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2012-10-24",
+        "symbol": "NG",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2016-10-24",
+        "symbol": "NG",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2017-10-24",
+        "symbol": "NG",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2020-09-23",
+        "symbol": "NG",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2023-10-24",
+        "symbol": "NG",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2024-04-23",
+        "symbol": "NG",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2024-10-24",
+        "symbol": "NG",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2025-05-22",
+        "symbol": "NG",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      },
+      {
+        "date": "2025-09-23",
+        "symbol": "NG",
+        "reason": "rv5/bv5 > 10 (contract roll)"
+      }
+    ]
+  },
+  "splits": [
+    {
+      "cutoff": "2019-01-01",
+      "n_folds": 1,
+      "train_start": "2009-09-25",
+      "test_first_origin": "2019-01-02",
+      "test_last_origin": "2026-10-29",
+      "n_test_days": 2032,
+      "n_test_forecasts": 98543,
+      "n_train_rows_before_cutoff": 64176,
+      "test_rows_without_forecast_by_model": {
+        "RW": 19,
+        "EWMA": 19,
+        "EWMA-RV": 19,
+        "ARCH": 19,
+        "GARCH": 19,
+        "GJR-GARCH": 19,
+        "EGARCH": 19,
+        "HAR": 418,
+        "HARQ": 418,
+        "logHAR": 418,
+        "logHAR-MJ": 418,
+        "logSHAR": 418,
+        "MEM": 19,
+        "AMEM": 19
+      },
+      "hyperparameters": {
+        "RW": {},
+        "EWMA": {
+          "lambda": 0.94
+        },
+        "EWMA-RV": {},
+        "ARCH": {
+          "p": 22,
+          "dist": "t"
+        },
+        "GARCH": {
+          "p": 1,
+          "q": 2,
+          "dist": "t"
+        },
+        "GJR-GARCH": {
+          "p": 1,
+          "q": 2,
+          "dist": "t"
+        },
+        "EGARCH": {
+          "p": 1,
+          "q": 2,
+          "dist": "t"
+        },
+        "HAR": {
+          "pooling": "pooled",
+          "estimator": "wls"
+        },
+        "HARQ": {
+          "pooling": "pooled",
+          "estimator": "wls"
+        },
+        "logHAR": {
+          "pooling": "per_asset"
+        },
+        "logHAR-MJ": {
+          "pooling": "per_asset"
+        },
+        "logSHAR": {
+          "pooling": "per_asset"
+        },
+        "MEM": {
+          "p": 2,
+          "q": 2
+        },
+        "AMEM": {
+          "p": 2,
+          "q": 2
+        }
+      }
+    },
+    {
+      "cutoff": "2021-01-01",
+      "n_folds": 1,
+      "train_start": "2009-09-25",
+      "test_first_origin": "2021-01-04",
+      "test_last_origin": "2026-10-29",
+      "n_test_days": 1513,
+      "n_test_forecasts": 73259,
+      "n_train_rows_before_cutoff": 89552,
+      "test_rows_without_forecast_by_model": {
+        "RW": 15,
+        "EWMA": 15,
+        "EWMA-RV": 15,
+        "ARCH": 15,
+        "GARCH": 15,
+        "GJR-GARCH": 15,
+        "EGARCH": 15,
+        "HAR": 330,
+        "HARQ": 330,
+        "logHAR": 330,
+        "logHAR-MJ": 330,
+        "logSHAR": 330,
+        "MEM": 15,
+        "AMEM": 15
+      },
+      "hyperparameters": {
+        "RW": {},
+        "EWMA": {
+          "lambda": 0.9
+        },
+        "EWMA-RV": {},
+        "ARCH": {
+          "p": 22,
+          "dist": "t"
+        },
+        "GARCH": {
+          "p": 1,
+          "q": 1,
+          "dist": "t"
+        },
+        "GJR-GARCH": {
+          "p": 1,
+          "q": 2,
+          "dist": "t"
+        },
+        "EGARCH": {
+          "p": 1,
+          "q": 2,
+          "dist": "t"
+        },
+        "HAR": {
+          "pooling": "per_asset",
+          "estimator": "wls"
+        },
+        "HARQ": {
+          "pooling": "pooled",
+          "estimator": "ols"
+        },
+        "logHAR": {
+          "pooling": "pooled"
+        },
+        "logHAR-MJ": {
+          "pooling": "per_asset"
+        },
+        "logSHAR": {
+          "pooling": "pooled"
+        },
+        "MEM": {
+          "p": 1,
+          "q": 2
+        },
+        "AMEM": {
+          "p": 1,
+          "q": 2
+        }
+      }
+    }
+  ],
+  "tuning": {
+    "criterion": "QLIKE on the validation years, all assets together",
+    "validation": "2 one-year block(s) before each cutoff, then re-estimation on the whole training period"
+  },
+  "testing": {
+    "main_loss": "QLIKE = rv/h - log(rv/h) - 1 (lower is better)",
+    "common_sample": "every model is scored on the same asset-days",
+    "tests_on": "daily loss averaged across assets",
+    "dm": "two-sided Diebold-Mariano, Newey-West variance, negative = better than benchmark",
+    "mcs": "Hansen-Lunde-Nason, range statistic, stationary bootstrap"
+  },
+  "models_not_converged": [],
+  "environment": {
+    "python": "3.12.10",
+    "git_commit": "737cb4a",
+    "numpy": "2.5.4",
+    "pandas": "3.1.1",
+    "scipy": "1.18.1",
+    "arch": "9.0.0"
+  }
+}

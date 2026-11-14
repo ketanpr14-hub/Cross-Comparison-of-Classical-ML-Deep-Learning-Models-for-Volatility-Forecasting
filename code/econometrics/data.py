@@ -12,7 +12,7 @@ import argparse
 import numpy as np
 import pandas as pd
 
-from .config import BAD_DAYS, DATASETS, JUMP_FILTER, MEASURES, RunConfig
+from .config import BAD_DAYS, COMBINED, DATASETS, JUMP_FILTER, MEASURES, RunConfig
 
 
 # ------------------------------------------------------------------ 1. load
@@ -92,7 +92,23 @@ def add_features(df, week=5, month=22):
 
 
 def build_panel(cfg: RunConfig):
-    raw = load_raw(cfg.dataset)
+    """
+    One dataset, or the three stacked when cfg.dataset is "combined". In that case each
+    file is cleaned with its own rules and gets its own features first, so the market
+    level of an asset is still the average of its own asset class. The models then see
+    one panel: pooled regressions and hyperparameters are shared by all 50 assets.
+    """
+    if cfg.dataset == COMBINED:
+        parts = [_build_one(name, cfg) for name in DATASETS]
+        panel = pd.concat([p for p, _ in parts], ignore_index=True)
+        if panel.duplicated(["symbol", "date"]).any():
+            raise ValueError("the same symbol appears in two datasets.")
+        return panel, pd.concat([log for _, log in parts], ignore_index=True)
+    return _build_one(cfg.dataset, cfg)
+
+
+def _build_one(dataset, cfg: RunConfig):
+    raw = load_raw(dataset)
     if cfg.symbols:
         raw = raw[raw["symbol"].isin(cfg.symbols)]
     if cfg.start:
@@ -101,14 +117,15 @@ def build_panel(cfg: RunConfig):
         raw = raw[raw["date"] <= cfg.end]
     if cfg.quick and not cfg.symbols:
         raw = raw[raw["symbol"].isin(sorted(raw["symbol"].unique())[:3])]
-    cleaned, mask_log = clean(raw.reset_index(drop=True), cfg.dataset)
+    cleaned, mask_log = clean(raw.reset_index(drop=True), dataset)
     panel = add_features(cleaned, *cfg.har_lags)
+    panel["asset_class"] = dataset
     return panel, mask_log
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", choices=list(DATASETS), default="stocks")
+    parser.add_argument("--dataset", choices=[*DATASETS, COMBINED], default="stocks")
     args = parser.parse_args()
     panel, mask_log = build_panel(RunConfig(dataset=args.dataset))
     print(f"{args.dataset}: {len(panel):,} rows, {panel['symbol'].nunique()} assets, "

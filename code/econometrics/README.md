@@ -41,6 +41,7 @@ Other settings of `run` (all are saved with the results; `--help` lists them):
 python -m econometrics.run --dataset forex --split-policy expanding --refit-every 252
 python -m econometrics.run --dataset futures --split-policy rolling --window 1500
 python -m econometrics.run --dataset stocks --start 2018-01-01 --cutoffs 2023-01-01
+python -m econometrics.run --dataset combined      # the three files as one panel of 50 assets
 python -m econometrics.run --dataset stocks --no-tune     # default hyperparameters, about 30 s
 python -m econometrics.run --dataset stocks --no-tune --models RW GARCH logHAR --garch-dist t
 python -m econometrics.run --dataset stocks --tune-years 1   # one validation year, as in the DL branch
@@ -91,8 +92,10 @@ when the validation loss stops improving. These models have no training epochs, 
 is nothing to stop early; the same validation idea is used to choose their hyperparameters
 (`tuning.py`):
 
-1. the two years before the cutoff are two validation blocks. For each block, every
-   candidate is estimated on the data before the block and forecasts the block;
+1. the two years before the cutoff are two validation blocks of one year each. This is a
+   walk-forward validation: for each block, every candidate is estimated on all the data
+   before the block (the estimation window grows by one year from block 1 to block 2,
+   it does not have a fixed length) and forecasts the block;
 2. the candidate with the lowest QLIKE over both blocks, all assets together, is kept;
 3. the model is re-estimated with it on the whole training period and then tested.
 
@@ -127,6 +130,7 @@ this step and uses the defaults.
 | `per_asset_metrics.csv` | QLIKE and both MSE of every model on every asset |
 | `params.csv` | estimated parameters of every model, asset and fold |
 | `tuning.csv` | every hyperparameter candidate, its validation QLIKE, whether it was selected |
+| `per_class_metrics.csv` | `combined` only: QLIKE and both MSE of every model on stocks, forex and futures |
 | `report.md`, `figures/` | written by `report.py` |
 | `forecasts.csv.gz` | every forecast; not versioned |
 
@@ -183,6 +187,51 @@ Test QLIKE with tuned hyperparameters against the default ones (the reference ru
   guaranteed out of sample.
 - On stocks before 2019, every EGARCH candidate has a validation QLIKE above 100 (its
   forecast explodes on a few days), so its selection there is between bad options.
+
+## The three datasets as one panel
+
+`--dataset combined` stacks the three files: 50 assets, 2009-09-25 to 2026-10-30. Each
+file is cleaned with its own rules, and the market level of an asset is still the average
+of its own asset class. What is shared is the pooled regressions and the hyperparameters:
+one set per model for the 50 assets. Stocks start in 2015, so before that date the panel
+holds the 10 forex and futures assets only.
+
+| Test from | Forecasts | Best model | QLIKE | logHAR | GARCH | Models in the 90 % MCS |
+|---|---|---|---|---|---|---|
+| 2019 | 98,543 | logHAR-MJ | 0.1769 | 0.1815 | 0.2591 | logHAR-MJ |
+| 2021 | 73,259 | logHAR-MJ | 0.1736 | 0.1783 | 0.2327 | logHAR-MJ |
+
+The test asset-days of each class are exactly those of the separate runs, so the QLIKE of
+a class can be compared between the two (`per_class_metrics.csv`, and a table in
+`report.md`):
+
+| Class | Test from | Best model, separate run | QLIKE | Best model, combined run | QLIKE |
+|---|---|---|---|---|---|
+| stocks | 2019 | logHAR-MJ | 0.1811 | logHAR-MJ | 0.1811 |
+| stocks | 2021 | logHAR-MJ | 0.1766 | logHAR-MJ | 0.1766 |
+| forex | 2019 | logHAR-MJ | 0.1511 | logSHAR | 0.1509 |
+| forex | 2021 | logHAR-MJ | 0.1555 | logHAR-MJ | 0.1555 |
+| futures | 2019 | AMEM | 0.1674 | AMEM | 0.1674 |
+| futures | 2021 | logSHAR | 0.1661 | AMEM | 0.1671 |
+
+- The overall ranking is the one of stocks, which are 80 % of the forecasts. logHAR-MJ is
+  the only model in the Model Confidence Set at both cutoffs.
+- Stacking the datasets does not improve the forecasts. logHAR-MJ, MEM, AMEM, EWMA-RV and
+  RW give the same QLIKE as in the separate runs (the difference is below 0.1 %): they are
+  estimated asset by asset, and for logHAR-MJ the validation years select one regression
+  per asset in both cases.
+- logHAR and logSHAR move by -1 % to +2.5 % on forex and futures and by less than 0.5 %
+  on stocks.
+- One regression in levels for the three asset classes is harmful: when the pooled HAR
+  or HARQ is selected, its QLIKE rises by 18 % to 119 % on forex and by 48 % on futures
+  (2019). Variance levels differ too much between classes; the log models do not have
+  this problem.
+- Re-estimating every year on an expanding window keeps the same first eight models and
+  the same Model Confidence Set. QLIKE falls by 0.5 % to 1 % for logHAR-MJ and by 2 % to
+  6 % for the GARCH-type models and ARCH.
+- Hyperparameters chosen for 50 assets are mostly those of stocks. This helps ARCH on
+  forex and futures (-4 % to -7 % in three cases out of four, order 22 instead of 10)
+  and EWMA in two cases (-4 % and -5 %), and changes the GARCH-type models by less than 2 %.
 
 ## What the cleaning does, and what to keep in mind
 

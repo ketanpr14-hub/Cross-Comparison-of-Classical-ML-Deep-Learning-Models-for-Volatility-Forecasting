@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .config import DATASETS, RESULTS_DIR, ROOT
+from .config import COMBINED, DATASETS, RESULTS_DIR, ROOT
 from .plots import BLUE, DIVERGING, GREY, LIGHT_GREY, ORANGE, TEXT, TEXT_2, plt, save, use_style
 
 
@@ -155,6 +155,14 @@ def report(run_dir):
             chosen["candidates"] = chosen["model"].map(tuning.groupby("model").size()).fillna(1).astype(int)
             chosen["validation QLIKE"] = chosen["model"].map(best)
             chosen["with default values"] = chosen["model"].map(default)
+        if (run_dir / "per_class_metrics.csv").exists():
+            by_class = pd.read_csv(run_dir / "per_class_metrics.csv", dtype={"cutoff": str})
+            by_class = by_class[by_class["cutoff"] == cutoff]
+            wide = by_class.pivot(index="model", columns="asset_class", values="qlike").loc[table["model"]]
+            counts = by_class.drop_duplicates("asset_class").set_index("asset_class")["n_forecasts"]
+            wide.columns = [f"{c} ({counts[c]:,})" for c in wide.columns]
+            lines += ["QLIKE by asset class (number of forecasts in brackets):", "",
+                      wide.reset_index().to_markdown(index=False, floatfmt=".4f"), ""]
         lines += ["Hyperparameters used:", "", chosen.to_markdown(index=False, floatfmt=".4f").replace("nan", "   "), ""]
         print(f"\n{s['dataset']} | test from {cutoff} | {s['split_policy']} split")
         print(table.to_string(index=False, float_format=lambda v: f"{v:.4f}", na_rep="",
@@ -183,13 +191,13 @@ def report(run_dir):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--run", help="run folder; default = latest run")
-    parser.add_argument("--dataset", choices=list(DATASETS), help="latest run of this dataset")
+    parser.add_argument("--dataset", choices=[*DATASETS, COMBINED], help="latest run of this dataset")
     parser.add_argument("--all", action="store_true", help="every run instead of the latest one")
     args = parser.parse_args()
     if args.run:
         report(args.run)
     else:
-        for name in ([args.dataset] if args.dataset else DATASETS):
+        for name in ([args.dataset] if args.dataset else [*DATASETS, COMBINED]):
             runs = all_runs(name)
             for run in (runs if args.all else runs[-1:]):
                 report(run)

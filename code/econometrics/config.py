@@ -16,6 +16,9 @@ DATASETS = {
     for name in ("stocks", "forex", "futures")
 }
 
+# "combined" stacks the three files into one panel of 50 assets (see data.build_panel).
+COMBINED = "combined"
+
 # Same test cutoffs as the DL and foundation-model branches: train = before, test = after.
 CUTOFFS = ("2019-01-01", "2021-01-01")
 
