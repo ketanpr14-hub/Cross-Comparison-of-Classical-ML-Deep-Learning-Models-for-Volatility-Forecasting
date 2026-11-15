@@ -1,0 +1,13 @@
+Data/
+data/
+*.csv
+*.zip
+*.parquet
+results/forecasts/
+results/tables/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+*.code-workspace
+.vscode/
