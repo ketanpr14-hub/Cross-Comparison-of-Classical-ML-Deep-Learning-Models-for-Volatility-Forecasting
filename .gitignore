@@ -1,0 +1,19 @@
+# Data: never commit
+data/
+
+# Generated outputs (forecasts contain the transformed target, i.e. derived data)
+results/forecasts/
+results/tables/
+
+# Python / Jupyter clutter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
