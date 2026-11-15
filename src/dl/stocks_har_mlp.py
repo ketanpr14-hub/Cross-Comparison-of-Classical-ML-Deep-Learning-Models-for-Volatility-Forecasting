@@ -1,19 +1,25 @@
 """
 HAR and MLP volatility forecasts on the stocks file (all 40 stocks pooled).
 
+The data now comes from Jean's pipeline (code/econometrics/data.py): same cleaning, same
+features, same test rows as the econometrics branch. Nothing else changed in this script.
+
 Run from the project root:
     python src/dl/stocks_har_mlp.py            # full run
     python src/dl/stocks_har_mlp.py --quick    # tiny run, just to check that it works
+    python src/dl/stocks_har_mlp.py --dataset forex    # same thing on another file
 
 What it does, in order:
-  1. load the data, mask the 6 bad stock-days, build the target and the features
+  1. load the cleaned panel (Jean's build_panel) and keep the rows with all features
   2. for each cutoff (train = before, test = after):
        - baselines: "tomorrow = today" and HAR (linear regression)
        - MLP with early stopping, standardized inputs, several seeds, several architectures
   3. print one table and save it to a CSV
 """
 import argparse
+import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -22,12 +28,12 @@ from torch import nn
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 
-DATA = "data/realized_variance_stocks_20261030/realized_variance_stocks_20261030.csv"
-CUTOFFS = ["2019-01-01", "2021-01-01"]
+# Jean's code lives in code/econometrics: add code/ to the import path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "code"))
+from econometrics.config import RunConfig      # noqa: E402
+from econometrics.data import build_panel      # noqa: E402
 
-# 6 stock-days where rv5 is clearly wrong (found in the EDA). We set rv5 to missing there.
-BAD_DAYS = [("2023-01-24", "MCD"), ("2023-01-24", "NKE"), ("2023-01-24", "V"),
-            ("2023-01-24", "WMT"), ("2023-01-24", "XOM"), ("2016-09-27", "PG")]
+CUTOFFS = ["2019-01-01", "2021-01-01"]
 
 BASE = ["x_day", "x_week", "x_month"]
 FEATURE_SETS = {
@@ -37,34 +43,12 @@ FEATURE_SETS = {
 
 
 # ---------------------------------------------------------------- 1. data
-def load_data(path):
-    stocks = pd.read_csv(path, parse_dates=["date"])
-    df = stocks.sort_values(["symbol", "date"]).copy()
-
-    # mask the bad days BEFORE computing anything from rv5
-    for d, s in BAD_DAYS:
-        df.loc[(df["date"] == d) & (df["symbol"] == s), "rv5"] = np.nan
-
-    df["y"] = np.log(df["rv5"])                                   # log volatility
-
-    # market-wide features: average log-vol of all stocks on each date
-    mkt = df.groupby("date")["y"].mean()
-    df["m_day"] = df["date"].map(mkt)
-    df["m_week"] = df["date"].map(mkt.rolling(5).mean())
-
-    # share of today's variance that comes from jumps
-    df["jump_share"] = (df["rv5"] - df["bv5"]).clip(lower=0) / df["rv5"]
-    df.loc[df["y"].isna(), "jump_share"] = np.nan                 # blank it on the bad days too
-
-    # per-stock features: always inside groupby("symbol") so stocks never mix
-    g = df.groupby("symbol")["y"]
-    df["x_day"] = df["y"]
-    df["x_week"] = g.transform(lambda s: s.rolling(5).mean())
-    df["x_month"] = g.transform(lambda s: s.rolling(22).mean())
-    df["target"] = g.shift(-1)                                    # tomorrow's log volatility
-
+def load_data(dataset):
+    # Jean's build_panel does the cleaning (masked days) and builds the target and the
+    # features: x_day, x_week, x_month, m_day, m_week, jump_share, target, target_rv.
+    panel, _ = build_panel(RunConfig(dataset=dataset))
     all_features = sorted({f for fs in FEATURE_SETS.values() for f in fs})
-    return df.dropna(subset=all_features + ["target"])            # dropna LAST
+    return panel.dropna(subset=all_features + ["target", "target_rv"]).reset_index(drop=True)
 
 
 # ---------------------------------------------------------------- 2. models
@@ -116,7 +100,7 @@ def train_mlp(X_fit, y_fit, X_val, y_val, hidden, seed, lr, weight_decay, max_ep
 # ---------------------------------------------------------------- 3. main
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--data", default=DATA)
+    p.add_argument("--dataset", default="stocks", choices=["stocks", "forex", "futures"])
     p.add_argument("--out", default="results_stocks.csv")
     p.add_argument("--quick", action="store_true", help="tiny run to check that everything works")
     p.add_argument("--lr", type=float, default=0.01)
@@ -135,8 +119,8 @@ def main():
         seeds, archs, args.max_epochs, args.patience = [0, 1], [[8]], 30, 10
 
     t0 = time.time()
-    df = load_data(args.data)
-    print(f"data ready: {len(df)} rows, {df['symbol'].nunique()} stocks  ({time.time() - t0:.0f}s)")
+    df = load_data(args.dataset)
+    print(f"data ready: {len(df)} rows, {df['symbol'].nunique()} assets  ({time.time() - t0:.0f}s)")
 
     rows = []                                                     # (cutoff, features, model, mse)
     for cutoff in CUTOFFS:

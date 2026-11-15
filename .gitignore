@@ -1,3 +1,6 @@
 data/
 .venv/
 __pycache__/
+
+# every forecast of the deep learning runs: large, rebuilt by src/dl/run_dl.py
+results/dl/forecasts_*.csv.gz
