@@ -27,59 +27,60 @@ python foundation/stocks_foundation_models.py --quick
 # Run all four models at both depths on the same stock-dates.
 python foundation/stocks_foundation_models.py
 
-# Add one optimized result per model to the same CSV.
+# Add one optimized result per model and cutoff to the same CSV.
 python foundation/stocks_foundation_models.py --optimize
 
 # Compare frozen and fine-tuned weights without HAR.
 python foundation/stocks_foundation_models.py --compare-adaptation
 
-# Reproduce the original short-context run.
-python foundation/stocks_foundation_models.py --context 22 --out /tmp/stocks_22.csv
+# Compare both depths on the original complete-window sample.
+python foundation/stocks_foundation_models.py --strict-context
 
 # Adapt Chronos and evaluate it on the 2021 cutoff.
 python foundation/stocks_foundation_models.py --model chronos --context 1024 --finetune --out /tmp/stocks_lora.csv
 ```
 
-With both context lengths, the script scores only dates with 1,024 sessions of
-history. It fills missing historical values with the last available value for
-that stock. TTM uses its 52-session checkpoint with internal padding in the short
-run and its 1,024-session checkpoint in the long run. Timestral runs on CPU on
-Apple Silicon, so the long run can take longer than the earlier GPU experiment.
+## Sample and scoring
 
-Chronos LoRA fits on data before the last year preceding the cutoff. That last
-year supplies validation targets, and test forecasts start at the cutoff.
-Compare the LoRA scores with `--model chronos --context 1024 --cutoff 2021-01-01`.
-Add `--quick` to check the training path with one update.
+`load_panel` reads the stock CSV and applies Quentin's six exclusions.
+Both depths use the same stock-dates, including the first 680 forecasts of
+2019. The long run uses up to 1,024 past sessions. When fewer are available,
+Chronos, Timestral and TimesFM receive the shorter history. TTM keeps its
+fixed-size checkpoint and masks the leading padding. The `sample` column
+labels the full sample and the complete-window comparison (`strict_1024`).
 
-`--optimize` tests 22, 128, 256, 512 and 1,024 sessions. For TTM it uses the
-native checkpoints at 52, 90, 512 and 1,024 sessions. It compares the raw forecast,
-a linear calibration, a regression using the forecast and the three HAR
-features, and blends with Quentin's market-and-jump HAR (25%, 50% or 75% HAR).
-The blend uses a HAR fitted before 2020. Calibration uses January–June 2020.
-July–December 2020 selects the depth and calibration. Both halves use one
-session in five. At the selected depth, the script also tries Chronos LoRA and
-forecast-head fine-tuning for TTM and Timestral, using data before 2020.
-TimesFM 3.0 keeps its pretrained weights in this experiment.
+The CSV reports `n_forecasts`, MSE on `log(rv5)`, and QLIKE on the variance
+scale. For each model and cutoff, `sigma2` is the sample variance of log
+forecast errors in the preceding validation year (one session in five).
+QLIKE uses the variance forecast `exp(predicted_log_rv5 + sigma2 / 2)`.
+For the optimized variants, the second half of the validation year supplies
+the residuals, after fitting any calibration on its first half.
 
-The winning variant for each model is evaluated from the 2021 cutoff on the
-same dates as the baseline table. `adaptation` records what was selected, and
-`validation_mse` records its score on July–December 2020. `--optimize` preserves
-existing baseline rows and replaces previous optimized rows for the models run.
+## Adaptation
 
-`--compare-adaptation` appends a pair per model at the depth selected above
-(Chronos 1,024, Timestral 128, TimesFM 512, TTM 52). Each pair uses the same
-2021 test rows, input history and prediction code. Chronos uses LoRA, while
-Timestral, TimesFM and TTM train only their forecast heads. All weight updates
-use targets before 2020. TimesFM head training uses MLX on Apple Silicon.
-The `_solo_` rows contain only the foundation model's forecast.
+`--optimize` picks the depth and any calibration by validation MSE. It tries
+22, 128, 256, 512 and 1,024 sessions, or the native TTM checkpoints at 52,
+90, 512 and 1,024. The 2019 search stops at 512 because there are only 755
+sessions per stock before 2018. Candidates include the raw forecast, linear
+calibration and mixes with Quentin's market-and-jump HAR. The script also
+tries LoRA for Chronos and head fine-tuning for Timestral and TTM at the
+selected depth. TimesFM keeps its pretrained weights in this mode.
 
-Each run writes one CSV to `results/stocks_foundation_models.csv`. It has one row
-per model, depth and cutoff. `forecast_seconds` times inference on the full set
-for each model and depth. The two cutoffs reuse those forecasts. `--out` takes a
-CSV path. Without `--out`, `--quick` writes to the system's temporary directory
-so it won't replace the full results. The baseline run starts a new table.
-The two adaptation commands add their rows to that table.
+`--compare-adaptation` scores each model before and after fine-tuning without
+HAR, at the same depth and on the same dates. The depths come from the
+validation search for each cutoff. For 2019, they are 256 for Chronos and
+Timestral, 22 for TimesFM and 52 for TTM. For 2021, they are 1,024 for Chronos,
+128 for Timestral, 512 for TimesFM and 52 for TTM. Both modes use 2018 for
+validation before the 2019 cutoff and 2020 before the 2021 cutoff. Weight
+updates use only targets before the validation year. TimesFM head training
+uses MLX on Apple Silicon.
 
-The supplied CSV contains the results of the earlier full runs. The 22-session
-times were measured on the original 78,605 forecasts, before aligning the scores
-to the 77,925 dates common to both depths.
+Each run updates the relevant rows in `results/stocks_foundation_models.csv`.
+Use `--cutoff` to run one cutoff or `--out` to choose another CSV. Without
+`--out`, `--quick` writes to a temporary location.
+
+For the baseline table, the earlier forecasts were matched by stock and
+date, then rescored alongside the 680 new forecasts. Inference times appear
+only where they cover the sample shown. The other experiments were rerun.
+The Timestral adaptation runs used Apple GPU acceleration with normalization
+on CPU. The script uses Timestral's CPU path on Mac, so its times can differ.

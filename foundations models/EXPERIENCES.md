@@ -1,8 +1,9 @@
 # Prévision de la volatilité des actions
 
-On prévoit log(rv5) à J+1 sur les 40 actions VOLARE.
-On mesure l’erreur avec la MSE et on prend le HAR de base de Quentin comme référence.
+On prévoit `log(rv5)` à J+1 sur les 40 actions VOLARE. On compare les prévisions au HAR de base de Quentin avec la MSE sur le log et QLIKE sur la variance. La correction `sigma2` est estimée sur les erreurs de validation.
 
-1. **Test de départ.** On teste Chronos-2, Timestral-209M, TimesFM 3.0 et TTM-R3 avec 22 puis 1 024 séances d’historique, sur les mêmes dates. À 22 séances, HAR est devant les quatre modèles. À 1 024 séances, les quatre passent devant HAR.
-2. **Variantes optimisées.** On choisit la profondeur et les réglages sur 2020, puis on évalue à partir de 2021. Le meilleur résultat est Chronos adapté avec LoRA, mélangé au HAR enrichi (25 % Chronos, 75 % HAR). Sa MSE est de 0,27098, contre 0,27250 pour le HAR enrichi seul entraîné sur la même période.
-3. **Fine-tuning sans HAR.** On compare chaque modèle avant et après adaptation, à profondeur et dates identiques. Chronos utilise LoRA. Pour TTM, Timestral et TimesFM, on entraîne seulement la tête de prévision. La MSE baisse de 0,99 % pour TTM, 0,15 % pour TimesFM et 0,09 % pour Timestral. Elle augmente de 0,56 % pour Chronos.
+1. **Test de départ.** On teste les quatre modèles avec 22 puis jusqu’à 1 024 séances. Le contexte raccourci au début de 2019 permet de retrouver les 78 605 prévisions de Quentin. Le CSV garde aussi les scores sur les 77 925 dates à contexte complet pour cette coupure.
+2. **Variantes optimisées.** On choisit les réglages sur 2018 ou 2020, avant chaque coupure. Les meilleurs QLIKE sont ceux du mélange TimesFM–HAR en 2019 (0,18242) et du mélange Chronos–HAR en 2021 (0,17631).
+3. **Fine-tuning sans HAR.** On compare chaque modèle avant et après adaptation, à profondeur et dates identiques pour chaque coupure. Chronos utilise LoRA. Pour TTM, Timestral et TimesFM, on entraîne la tête de prévision.
+
+Tous les scores sont dans le [CSV de résultats](results/stocks_foundation_models.csv).

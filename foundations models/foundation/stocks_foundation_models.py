@@ -32,14 +32,19 @@ TTM_REVISIONS = {
     512: "7b070728ff280ee2bb682bd8dfbe71da21ca2c7c",
     1024: "c6da085bc334cb37b268c2312bc45f859cd316c9",
 }
-ADAPTATION_DEPTHS = {"chronos": 1024, "timestral": 128, "timesfm": 512, "ttm": 52}
+# Depths selected on the year before each cutoff, then held fixed for both runs.
+ADAPTATION_DEPTHS = {
+    "2019-01-01": {"chronos": 256, "timestral": 256, "timesfm": 22, "ttm": 52},
+    "2021-01-01": {"chronos": 1024, "timestral": 128, "timesfm": 512, "ttm": 52},
+}
 SCORE_COLUMNS = [
     "cutoff", "context", "model", "n_forecasts", "mse_log_rv5", "forecast_seconds",
-    "adaptation", "validation_mse",
+    "adaptation", "validation_mse", "sigma2", "qlike", "sample",
 ]
 
 
-def load_stocks(path):
+def load_panel(path):
+    """Return one row per stock and forecast origin, with its next-session target."""
     stocks = pd.read_csv(path, usecols=["date", "symbol", "rv5", "bv5"], parse_dates=["date"])
     stocks = stocks.sort_values(["symbol", "date"]).reset_index(drop=True)
     if stocks.duplicated(["symbol", "date"]).any():
@@ -62,16 +67,22 @@ def load_stocks(path):
     return stocks
 
 
-def make_windows(stocks, depth, rows):
+def make_windows(stocks, depth, rows, allow_short=False):
     dates, contexts = [], []
     for _, stock in stocks.groupby("symbol", sort=False):
-        if len(stock) < depth:
-            continue
-        # Fill gaps inside the history using only earlier sessions of this stock.
+        # Fill gaps using only observations available at the forecast origin.
         history = stock["log_rv"].ffill().to_numpy()
+        if allow_short:
+            history = np.pad(history, (depth - 1, 0), constant_values=np.nan)
+            origins = stock
+        else:
+            if len(stock) < depth:
+                continue
+            origins = stock.iloc[depth - 1:]
         windows = np.lib.stride_tricks.sliding_window_view(history, depth)
-        origins = stock.iloc[depth - 1:]
-        keep = rows.loc[origins.index].to_numpy() & np.isfinite(windows).all(axis=1)
+        keep = rows.loc[origins.index].to_numpy(copy=True)
+        if not allow_short:
+            keep &= np.isfinite(windows).all(axis=1)
         dates.append(origins.loc[keep])
         contexts.append(windows[keep].astype(np.float32))
     if not dates or not any(len(part) for part in dates):
@@ -144,7 +155,8 @@ def predict_batch(name, model, batch, device):
 
 def ttm_median(model, batch, device):
     values = torch.from_numpy(batch).to(device).unsqueeze(-1)
-    output = model(past_values=values, past_observed_mask=torch.ones_like(values, dtype=torch.bool),
+    observed = torch.isfinite(values)
+    output = model(past_values=values.masked_fill(~observed, 0), past_observed_mask=observed,
                    return_loss=False)
     median = list(model.config.quantile_levels).index(0.5)
     return output.quantile_outputs[:, median, 0, 0]
@@ -152,6 +164,15 @@ def ttm_median(model, batch, device):
 
 @torch.inference_mode()
 def forecast(name, model, contexts, device, batch_size):
+    if name != "ttm" and np.isnan(contexts[:, 0]).any():
+        # Each batch has the same observed length. No padded values reach the model.
+        lengths = np.isfinite(contexts).sum(axis=1)
+        predictions = np.empty(len(contexts))
+        for length in np.unique(lengths):
+            rows = lengths == length
+            predictions[rows] = forecast(name, model, contexts[rows, -length:], device, batch_size)
+        return predictions
+
     predictions = []
     for start in range(0, len(contexts), batch_size):
         batch = np.ascontiguousarray(contexts[start:start + batch_size])
@@ -215,14 +236,14 @@ def timestral_training_median(model, batch, device):
     return (positive[:, 0, model.median_index] - negative[:, 0, model.median_index]) / 2
 
 
-def head_training_windows(stocks, depth):
-    train_rows = stocks["eligible"] & stocks["target_date"].lt("2020-01-01")
+def head_training_windows(stocks, depth, before):
+    train_rows = stocks["eligible"] & stocks["target_date"].lt(before)
     train, contexts = make_windows(stocks, depth, train_rows)
     return contexts, train["target"].to_numpy(dtype=np.float32)
 
 
-def finetune_head(name, model, stocks, depth, device, steps):
-    contexts, targets = head_training_windows(stocks, depth)
+def finetune_head(name, model, stocks, depth, device, steps, before):
+    contexts, targets = head_training_windows(stocks, depth, before)
 
     if name == "timestral":
         network = model.model
@@ -249,12 +270,12 @@ def finetune_head(name, model, stocks, depth, device, steps):
     return model
 
 
-def finetune_timesfm(stocks, depth, steps):
+def finetune_timesfm(stocks, depth, steps, before):
     import mlx.core as mx
     import mlx.nn as nn
     import mlx.optimizers as optim
 
-    contexts, targets = head_training_windows(stocks, depth)
+    contexts, targets = head_training_windows(stocks, depth, before)
     forecaster = load_model("timesfm", depth, "mps", compile_mlx=False)
     network = forecaster.model
     network.freeze()
@@ -283,15 +304,15 @@ def finetune_timesfm(stocks, depth, steps):
     return tuned
 
 
-def adapt_model(name, model, stocks, depth, device, args):
+def adapt_model(name, model, stocks, depth, device, args, before):
     steps = 1 if args.quick else args.steps
     if name == "chronos":
-        series = chronos_training_series(stocks, "2020-01-01", depth, args.quick)
+        series = chronos_training_series(stocks, before, depth, args.quick)
         return train_chronos(model, series, depth, steps, args.quick), "lora"
     if name == "timesfm":
-        return finetune_timesfm(stocks, depth, steps), "head_tuned"
+        return finetune_timesfm(stocks, depth, steps, before), "head_tuned"
     tuned = load_model(name, depth, device)
-    return finetune_head(name, tuned, stocks, depth, device, steps), "head_tuned"
+    return finetune_head(name, tuned, stocks, depth, device, steps, before), "head_tuned"
 
 
 def calibration_inputs(data, predictions, method):
@@ -300,8 +321,7 @@ def calibration_inputs(data, predictions, method):
     return np.column_stack([predictions, data[HAR_FEATURES].to_numpy()])
 
 
-def choose_calibration(validation, predictions, har_predictions):
-    fit = validation["target_date"].lt("2020-07-01").to_numpy()
+def choose_calibration(validation, predictions, har_predictions, fit):
     actual = validation["target"].to_numpy()
     best = (np.mean((actual[~fit] - predictions[~fit]) ** 2), "raw", None)
     for method in ("affine", "with_har"):
@@ -318,21 +338,45 @@ def choose_calibration(validation, predictions, har_predictions):
     return best
 
 
-def optimized_scores(stocks, names, args):
-    cutoff = "2021-01-01"
-    in_validation = stocks["target_date"].ge("2020-01-01") & stocks["target_date"].lt(cutoff)
-    val_dates = stocks.loc[in_validation, "target_date"].sort_values().drop_duplicates()
-    stride = 40 if args.quick else 5
-    val_rows = stocks["eligible"] & stocks["target_date"].isin(val_dates.iloc[::stride])
-    test_rows = stocks["eligible"] & stocks["date"].ge(cutoff)
-    if args.quick:
-        two_stocks = stocks["symbol"].isin(stocks["symbol"].unique()[:2])
-        val_rows &= two_stocks
-        first_test_rows = stocks.loc[test_rows & two_stocks].groupby("symbol").head(2)
-        test_rows &= stocks.index.isin(first_test_rows.index)
-    validation, val_context = make_windows(stocks, 1024, val_rows)
-    test, test_context = make_windows(stocks, 1024, test_rows)
-    train = stocks.loc[stocks["eligible"] & stocks["target_date"].lt("2020-01-01")]
+def validation_start(cutoff):
+    return pd.Timestamp(cutoff) - pd.DateOffset(years=1)
+
+
+def validation_windows(stocks, cutoff, depth, quick):
+    in_validation = stocks["target_date"].ge(validation_start(cutoff)) & stocks["target_date"].lt(cutoff)
+    dates = stocks.loc[in_validation, "target_date"].sort_values().drop_duplicates()
+    stride = 40 if quick else 5
+    rows = stocks["eligible"] & stocks["target_date"].isin(dates.iloc[::stride])
+    if quick:
+        rows &= stocks["symbol"].isin(stocks["symbol"].unique()[:2])
+    return make_windows(stocks, depth, rows, allow_short=True)
+
+
+def test_windows(stocks, cutoff, depth, quick, strict=False):
+    rows = stocks["eligible"] & stocks["date"].ge(cutoff)
+    test, contexts = make_windows(stocks, depth, rows, allow_short=not strict)
+    if quick:
+        keep = test.groupby("symbol").head(2).head(4).index
+        return test.loc[keep], contexts[keep]
+    return test, contexts
+
+
+def calibrated_forecast(data, predictions, har_predictions, method, regression):
+    if regression is not None:
+        return regression.predict(calibration_inputs(data, predictions, method))
+    if method in HAR_WEIGHTS:
+        weight = HAR_WEIGHTS[method]
+        return (1 - weight) * predictions + weight * har_predictions
+    return predictions
+
+
+def optimized_scores(stocks, names, args, cutoff):
+    before = validation_start(cutoff)
+    max_depth = 512 if cutoff == "2019-01-01" else 1024
+    validation, val_context = validation_windows(stocks, cutoff, max_depth, args.quick)
+    test, test_context = test_windows(stocks, cutoff, max_depth, args.quick)
+    fit = validation["target_date"].lt(before + pd.DateOffset(months=6)).to_numpy()
+    train = stocks.loc[stocks["eligible"] & stocks["target_date"].lt(before)]
     har = LinearRegression().fit(train[HAR_MARKET_FEATURES], train["target"])
     val_har = har.predict(validation[HAR_MARKET_FEATURES])
     scores = []
@@ -340,78 +384,86 @@ def optimized_scores(stocks, names, args):
         device = model_device(name, args.device)
         depths = (52, 90, 512, 1024) if name == "ttm" else (22, 128, 256, 512, 1024)
         best_mse = np.inf
-        for depth in depths:
+        for depth in (depth for depth in depths if depth <= max_depth):
             model = load_model(name, depth, device)
             predictions = forecast(name, model, val_context[:, -depth:], device, args.batch_size)
-            mse, method, regression = choose_calibration(validation, predictions, val_har)
+            mse, method, regression = choose_calibration(validation, predictions, val_har, fit)
             print(f"{name} {depth} sessions, {method}: validation MSE {mse:.5f}", flush=True)
             if mse < best_mse:
                 best_mse, best_depth, best_model = mse, depth, model
-                best_method, best_regression = method, regression
+                best_method, best_regression, best_validation = method, regression, predictions
         del model
 
         adaptation = "frozen"
         if name in ("chronos", "ttm", "timestral"):
-            tuned, tuned_method = adapt_model(name, best_model, stocks, best_depth, device, args)
+            tuned, tuned_method = adapt_model(name, best_model, stocks, best_depth, device, args, before)
             predictions = forecast(name, tuned, val_context[:, -best_depth:], device, args.batch_size)
-            mse, method, regression = choose_calibration(validation, predictions, val_har)
+            mse, method, regression = choose_calibration(validation, predictions, val_har, fit)
             print(f"{name} {best_depth} sessions, fine-tuned + {method}: validation MSE {mse:.5f}", flush=True)
             if mse < best_mse:
                 best_mse, best_model = mse, tuned
-                best_method, best_regression = method, regression
+                best_method, best_regression, best_validation = method, regression, predictions
                 adaptation = tuned_method
             del tuned
 
         print(f"{name}: {best_depth} sessions, {adaptation} + {best_method}, {len(test):,} test forecasts", flush=True)
         started = perf_counter()
         predictions = forecast(name, best_model, test_context[:, -best_depth:], device, args.batch_size)
-        if best_regression is not None:
-            predictions = best_regression.predict(calibration_inputs(test, predictions, best_method))
-        if best_method in HAR_WEIGHTS:
-            weight = HAR_WEIGHTS[best_method]
-            predictions = (1 - weight) * predictions + weight * har.predict(test[HAR_MARKET_FEATURES])
+        predictions = calibrated_forecast(test, predictions, har.predict(test[HAR_MARKET_FEATURES]),
+                                          best_method, best_regression)
+        val_pred = calibrated_forecast(validation, best_validation, val_har, best_method, best_regression)
+        sigma2 = residual_variance(validation.loc[~fit], val_pred[~fit])
         add_scores(scores, test, predictions, (cutoff,), best_depth, f"{name}_optimized",
-                   perf_counter() - started, f"{adaptation}+{best_method}", best_mse)
+                   perf_counter() - started, f"{adaptation}+{best_method}", best_mse,
+                   sigma2={cutoff: sigma2})
         del best_model
     return scores
 
 
-def compare_adaptation(stocks, names, args):
-    cutoff = "2021-01-01"
-    rows = stocks["eligible"] & stocks["date"].ge(cutoff)
-    if args.quick:
-        sample = stocks.loc[rows].groupby("symbol").head(2).head(4)
-        rows &= stocks.index.isin(sample.index)
-    test, contexts = make_windows(stocks, max(ADAPTATION_DEPTHS.values()), rows)
+def compare_adaptation(stocks, names, args, cutoff):
+    before = validation_start(cutoff)
+    depths = ADAPTATION_DEPTHS[cutoff]
+    max_depth = max(depths[name] for name in names)
+    test, contexts = test_windows(stocks, cutoff, max_depth, args.quick)
+    validation, val_context = validation_windows(stocks, cutoff, max_depth, args.quick)
     scores = []
     for name in names:
-        depth = ADAPTATION_DEPTHS[name]
+        depth = depths[name]
         device = model_device(name, args.device)
         model = load_model(name, depth, device)
-        print(f"{name}: {depth} sessions, frozen, {len(test):,} forecasts", flush=True)
-        started = perf_counter()
-        frozen = forecast(name, model, contexts[:, -depth:], device, args.batch_size)
-        add_scores(scores, test, frozen, (cutoff,), depth, f"{name}_solo_frozen",
-                   perf_counter() - started, "frozen_no_har")
-
-        tuned, method = adapt_model(name, model, stocks, depth, device, args)
+        for method in ("frozen", "adapted"):
+            if method == "adapted":
+                model, method = adapt_model(name, model, stocks, depth, device, args, before)
+            print(f"{name}: {depth} sessions, {method}, {len(test):,} forecasts", flush=True)
+            val_pred = forecast(name, model, val_context[:, -depth:], device, args.batch_size)
+            sigma2 = residual_variance(validation, val_pred)
+            started = perf_counter()
+            predictions = forecast(name, model, contexts[:, -depth:], device, args.batch_size)
+            add_scores(scores, test, predictions, (cutoff,), depth, f"{name}_solo_{method}",
+                       perf_counter() - started, f"{method}_no_har", sigma2={cutoff: sigma2})
         del model
-        print(f"{name}: {depth} sessions, {method}, {len(test):,} forecasts", flush=True)
-        started = perf_counter()
-        adapted = forecast(name, tuned, contexts[:, -depth:], device, args.batch_size)
-        add_scores(scores, test, adapted, (cutoff,), depth, f"{name}_solo_{method}",
-                   perf_counter() - started, f"{method}_no_har")
-        del tuned
     return scores
 
 
+def residual_variance(validation, predictions):
+    residuals = validation["target"].to_numpy() - predictions
+    if len(residuals) < 2 or not np.isfinite(residuals).all():
+        raise ValueError("sigma2 needs at least two finite validation residuals.")
+    return np.var(residuals, ddof=1)
+
+
 def add_scores(scores, test, predictions, cutoffs, depth, name, forecast_seconds=None,
-               adaptation=None, validation_mse=None):
+               adaptation=None, validation_mse=None, *, sigma2, sample="full"):
     for cutoff in cutoffs:
         keep = test["date"].ge(cutoff).to_numpy()
         actual = test.loc[keep, "target"].to_numpy()
         mse = np.mean((actual - predictions[keep]) ** 2)
-        scores.append((cutoff, depth, name, len(actual), mse, forecast_seconds, adaptation, validation_mse))
+        variance = sigma2[cutoff]
+        # log of realized variance divided by the bias-corrected forecast variance.
+        log_ratio = actual - predictions[keep] - variance / 2
+        qlike = np.mean(np.expm1(log_ratio) - log_ratio)
+        scores.append((cutoff, depth, name, len(actual), mse, forecast_seconds, adaptation,
+                       validation_mse, variance, qlike, sample))
 
 
 def save_scores(scores, out, append=False):
@@ -419,7 +471,14 @@ def save_scores(scores, out, append=False):
     print(table.to_string(index=False, float_format=lambda value: f"{value:.5f}"))
     if append and out.is_file():
         previous = pd.read_csv(out, dtype=str)
-        previous = previous.loc[~previous["model"].isin(table["model"])]
+        keys = ["model", "context", "cutoff", "sample"]
+        previous["sample"] = previous.get("sample", "full")
+        # Optimized rows have one selected depth per model and cutoff.
+        optimized = table.loc[table["model"].str.endswith("_optimized"), ["model", "cutoff"]]
+        old_variants = pd.MultiIndex.from_frame(previous[["model", "cutoff"]])
+        previous = previous.loc[~old_variants.isin(pd.MultiIndex.from_frame(optimized.astype(str)))]
+        replaced = pd.MultiIndex.from_frame(table[keys].astype(str))
+        previous = previous.loc[~pd.MultiIndex.from_frame(previous[keys]).isin(replaced)]
         table = pd.concat([previous, table], ignore_index=True)
     out.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=out.parent) as directory:
@@ -442,8 +501,9 @@ def main():
     parser.add_argument("--threads", type=int, default=6)
     parser.add_argument("--quick", action="store_true", help="two stocks and a few test dates")
     parser.add_argument("--finetune", action="store_true", help="adapt Chronos-2 with LoRA before scoring")
-    parser.add_argument("--optimize", action="store_true", help="add one 2021 result per model after tuning on 2020")
+    parser.add_argument("--optimize", action="store_true", help="select settings on the year before each cutoff")
     parser.add_argument("--compare-adaptation", action="store_true", help="compare frozen and adapted models without HAR")
+    parser.add_argument("--strict-context", action="store_true", help="use the original complete-window sample")
     parser.add_argument("--steps", type=int, default=100, help="number of fine-tuning updates")
     args = parser.parse_args()
 
@@ -452,8 +512,6 @@ def main():
         parser.error("--finetune requires --model chronos and one context length")
     if sum((args.optimize, args.finetune, args.compare_adaptation)) > 1:
         parser.error("Choose one of --optimize, --finetune and --compare-adaptation.")
-    if (args.optimize or args.compare_adaptation) and args.cutoff == "2019-01-01":
-        parser.error("This experiment uses the 2021 test cutoff.")
     if min(args.batch_size, args.threads, args.steps) < 1:
         parser.error("--batch-size, --threads and --steps must be positive")
     cutoff = args.cutoff or ("2021-01-01" if args.finetune else None)
@@ -462,21 +520,25 @@ def main():
         parser.error(f"CSV not found at {args.data}. Pass its path with --data.")
 
     torch.set_num_threads(args.threads)
-    stocks = load_stocks(args.data)
+    stocks = load_panel(args.data)
     out = args.out or RESULTS
     if args.quick and args.out is None:
         out = Path(gettempdir()) / "stocks_foundation_models_quick.csv"
     names = list(CHECKPOINTS) if args.model == "all" else [args.model]
     if args.optimize:
-        save_scores(optimized_scores(stocks, names, args), out, append=True)
+        save_scores([row for day in cutoffs for row in optimized_scores(stocks, names, args, day)], out, append=True)
         return
     if args.compare_adaptation:
         if "timesfm" in names and model_device("timesfm", args.device) != "mps":
             parser.error("TimesFM head training uses MLX on Apple Silicon. Run with --device auto on that Mac.")
-        save_scores(compare_adaptation(stocks, names, args), out, append=True)
+        save_scores([row for day in cutoffs for row in compare_adaptation(stocks, names, args, day)], out, append=True)
         return
 
-    test, contexts = make_windows(stocks, max(depths), stocks["eligible"] & stocks["date"].ge(cutoffs[0]))
+    depth_max = max(depths)
+    sample = f"strict_{depth_max}" if args.strict_context else "full"
+    test, contexts = make_windows(stocks, depth_max, stocks["eligible"] & stocks["date"].ge(cutoffs[0]),
+                                  allow_short=not args.strict_context)
+    validations = {day: validation_windows(stocks, day, depth_max, args.quick) for day in cutoffs}
     if args.quick:
         small = test[test["symbol"].isin(test["symbol"].unique()[:2])]
         positions = [small.loc[small["date"].ge(day)].groupby("symbol").head(4).index for day in cutoffs]
@@ -486,12 +548,20 @@ def main():
         parser.error("No eligible test rows at the requested cutoff.")
 
     scores = []
-    add_scores(scores, test, test["log_rv"].to_numpy(), cutoffs, 1, "persistence")
+    persistence = {day: residual_variance(val, val["log_rv"].to_numpy())
+                   for day, (val, _) in validations.items()}
+    add_scores(scores, test, test["log_rv"].to_numpy(), cutoffs, 1, "persistence",
+               sigma2=persistence, sample=sample)
     for day in cutoffs:
+        val, _ = validations[day]
+        fit = stocks.loc[stocks["eligible"] & stocks["target_date"].lt(validation_start(day))]
+        validation_har = LinearRegression().fit(fit[HAR_FEATURES], fit["target"])
+        sigma2 = residual_variance(val, validation_har.predict(val[HAR_FEATURES]))
         train = stocks.loc[stocks["eligible"] & stocks["date"].lt(day)]
         # Match Quentin's original HAR split by forecast origin.
         har = LinearRegression().fit(train[HAR_FEATURES], train["target"])
-        add_scores(scores, test, har.predict(test[HAR_FEATURES]), (day,), 22, "HAR")
+        add_scores(scores, test, har.predict(test[HAR_FEATURES]), (day,), 22, "HAR",
+                   sigma2={day: sigma2}, sample=sample)
 
     for depth in depths:
         for name in names:
@@ -501,15 +571,20 @@ def main():
             if args.finetune:
                 steps = 1 if args.quick else args.steps
                 model = finetune_chronos(model, stocks, cutoff, depth, steps, args.quick)
+            variances = {}
+            for day, (val, history) in validations.items():
+                val_pred = forecast(name, model, history[:, -depth:], device, args.batch_size)
+                variances[day] = residual_variance(val, val_pred)
             started = perf_counter()
             predictions = forecast(name, model, contexts[:, -depth:], device, args.batch_size)
             forecast_seconds = perf_counter() - started
             model_name = f"{name}_lora" if args.finetune else name
-            add_scores(scores, test, predictions, cutoffs, depth, model_name, forecast_seconds)
+            add_scores(scores, test, predictions, cutoffs, depth, model_name, forecast_seconds,
+                       sigma2=variances, sample=sample)
             print(f"  forecast time {forecast_seconds:.1f}s", flush=True)
             del model
 
-    save_scores(scores, out)
+    save_scores(scores, out, append=True)
 
 
 if __name__ == "__main__":
