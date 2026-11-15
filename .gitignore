@@ -17,3 +17,6 @@ venv/
 Thumbs.db
 desktop.ini
 .vscode/
+
+# Forecast files (derived data)
+results/**/forecasts.csv.gz
