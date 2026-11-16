@@ -17,7 +17,7 @@ import pandas as pd
 from econometrics.config import COMBINED, CUTOFFS, DATASETS, RunConfig
 from econometrics.models import make_folds
 
-from .run import load
+from .run import load, validation_blocks
 
 
 def known_at_first_origin(train, later):
@@ -35,13 +35,13 @@ def check(dataset, split, quick):
         for fold in make_folds(dates, cutoff, cfg):
             train = panel[(dates >= fold.train_start) & (dates < fold.test_start)]
             test = panel[(dates >= fold.test_start) & (dates < fold.test_end)]
-            val_start = fold.test_start - pd.DateOffset(years=1)
-            fit, val = train[train["date"] < val_start], train[train["date"] >= val_start]
 
             # a label is known at an origin if its day is on or before that origin's day,
             # per asset (an asset may not trade on the first test or validation day)
             assert known_at_first_origin(train, test), "training label after first test origin"
-            assert known_at_first_origin(fit, val), "fit label after first validation origin"
+            for fit, val in validation_blocks(train, fold.test_start, tune_years=2):
+                assert known_at_first_origin(fit, val), "fit label after first validation origin"
+                assert fit["date"].max() < val["date"].min(), "validation row used for fitting"
             assert train.index.intersection(test.index).empty, "test row used for training"
             assert (test["date"] >= pd.Timestamp(cutoff)).all(), "test row before the cutoff"
             assert seen.intersection(test.index).empty, "test rows overlap between folds"

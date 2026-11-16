@@ -11,8 +11,12 @@ Ridge, lasso and k-nearest neighbors for tomorrow's log(rv5), on the project's s
 Data, cleaning, target, cutoffs, folds and losses come from code/econometrics (imported, not
 copied), so the test rows are the same as in the other branches.
 
-In every fold, the last year before the fold's first test day is the validation year:
-  1. each hyperparameter candidate is fitted on the years before it and scored by QLIKE on it;
+In every fold, the last two years before the fold's first test day are validation years, as
+in econometrics/tuning.py (--tune-years 1 keeps only the last one, as in the DL branch):
+  1. each hyperparameter candidate is fitted on everything before a validation year and
+     forecasts that year (walk-forward over the validation years); the candidate with the
+     lowest QLIKE over all validation days is kept. Two years keep one atypical year (FX in
+     2018) from driving the choice;
   2. the best candidate is refitted on the whole training period and forecasts the fold;
   3. sigma2, the variance of its validation log errors, turns the log forecast into a variance
      forecast: h = exp(log forecast + sigma2 / 2), the rule of the DL branch.
@@ -124,31 +128,46 @@ def coefficients(model, estimators, cols, fold, label):
 
 
 # ------------------------------------------------------------------ one fold
-def run_fold(panel, fold, k, specs, pooling, min_rows):
+def validation_blocks(train, test_start, tune_years):
+    """(fit, val) pairs: validation year b before the test start, fitted on everything before it."""
+    blocks = []
+    for b in range(tune_years, 0, -1):
+        v0 = test_start - pd.DateOffset(years=b)
+        v1 = test_start - pd.DateOffset(years=b - 1)
+        fit = train[train["date"] < v0]
+        val = train[(train["date"] >= v0) & (train["date"] < v1)]
+        if len(fit) and len(val):
+            blocks.append((fit, val))
+    return blocks
+
+
+def run_fold(panel, fold, k, specs, pooling, min_rows, tune_years=2):
     """Forecasts of every model on the fold's test rows, plus tuning and coefficient rows."""
     dates = panel["date"]
     train = panel[(dates >= fold.train_start) & (dates < fold.test_start)]
     test = panel[(dates >= fold.test_start) & (dates < fold.test_end)]
-    val_start = fold.test_start - pd.DateOffset(years=1)
-    fit, val = train[train["date"] < val_start], train[train["date"] >= val_start]
+    blocks = validation_blocks(train, fold.test_start, tune_years)
+    val_all = pd.concat([val for _, val in blocks])
 
     logf, h = pd.DataFrame(index=test.index), pd.DataFrame(index=test.index)
     tuning, coefs = [], []
 
-    # tomorrow = today: nothing to fit; sigma2 from the validation year like everything else
-    s2 = np.var(val["target"] - val["x_day"])
+    # tomorrow = today: nothing to fit; sigma2 from the validation years like everything else
+    s2 = np.var(val_all["target"] - val_all["x_day"])
     logf["RW"] = test["x_day"]
     h["RW"] = np.exp(test["x_day"] + s2 / 2)
 
     for label, (model, cols) in specs.items():
         rows = []
         for params in GRIDS[model]:
-            pv, _ = fit_predict(model, params, fit, val, cols, pooling, min_rows)
+            pv = np.concatenate([fit_predict(model, params, fit, val, cols, pooling, min_rows)[0]
+                                 for fit, val in blocks])
             ok = ~np.isnan(pv)
-            err = val["target"].to_numpy()[ok] - pv[ok]
+            err = val_all["target"].to_numpy()[ok] - pv[ok]
             s2 = np.var(err)
-            vq = ev.qlike(val["target_rv"].to_numpy()[ok], np.exp(pv[ok] + s2 / 2)).mean()
-            rows.append({"model": label, "fold": k, "params": params, "val_qlike": vq, "sigma2": s2})
+            vq = ev.qlike(val_all["target_rv"].to_numpy()[ok], np.exp(pv[ok] + s2 / 2)).mean()
+            rows.append({"model": label, "fold": k, "params": params, "val_qlike": vq, "sigma2": s2,
+                         "tune_years": len(blocks)})
         best = min(rows, key=lambda r: r["val_qlike"])
         for r in rows:
             tuning.append({**r, "params": str(r["params"]), "selected": r is best})
@@ -216,6 +235,8 @@ def main():
     p.add_argument("--pooling", choices=["pooled", "per_asset"], default="pooled")
     p.add_argument("--models", nargs="+", choices=MODELS, default=MODELS)
     p.add_argument("--feature-sets", nargs="+", choices=list(FEATURE_SETS), default=list(FEATURE_SETS))
+    p.add_argument("--tune-years", type=int, choices=[1, 2], default=2,
+                   help="validation years before each fold (2 as in econometrics, 1 as in DL)")
     p.add_argument("--quick", action="store_true", help="3 assets, few bootstrap draws")
     args = p.parse_args()
 
@@ -224,7 +245,8 @@ def main():
     panel = load(args.dataset, args.quick)
     specs = build_specs(args.models, args.feature_sets)
     print(f"{args.dataset}: {len(panel):,} usable rows, {panel['symbol'].nunique()} assets, "
-          f"{len(specs) + 1} models, {args.split} split, {args.pooling}")
+          f"{len(specs) + 1} models, {args.split} split, {args.pooling}, "
+          f"{args.tune_years} validation year(s)")
 
     tables, forecasts, tunings, coefs = [], [], [], []
     for cutoff in CUTOFFS:
@@ -232,7 +254,7 @@ def main():
         parts = []
         for k, fold in enumerate(folds):
             t0 = time.time()
-            parts.append(run_fold(panel, fold, k, specs, args.pooling, cfg.min_train))
+            parts.append(run_fold(panel, fold, k, specs, args.pooling, cfg.min_train, args.tune_years))
             tunings += [dict(r, cutoff=cutoff) for r in parts[-1][3]]
             coefs += [dict(r, cutoff=cutoff) for r in parts[-1][4]]
             print(f"  cutoff {cutoff} fold {k + 1}/{len(folds)}: test from "
@@ -247,7 +269,8 @@ def main():
               f"{tables[-1].drop(columns='cutoff').round(4).to_string()}\n")
 
     if not args.quick:
-        suffix = "" if args.pooling == "pooled" else "_per_asset"
+        suffix = ("" if args.pooling == "pooled" else "_per_asset") + \
+                 ("" if args.tune_years == 2 else "_tune1")
         out = OUT / args.dataset / f"{args.split}{suffix}"
         out.mkdir(parents=True, exist_ok=True)
         pd.concat(tables).rename_axis("model").to_csv(out / "metrics.csv")

@@ -11,7 +11,7 @@ Same as the rest of the project. Data, cleaning, target, cutoffs, folds and loss
 | Target | `log(rv5)` of the next session, per asset |
 | Cutoffs | test from 2019-01-01 and from 2021-01-01 |
 | Splits | `fixed` (main): train once before the cutoff. `expanding`: refit every 252 days on all past data. `rolling`: refit every 252 days on the last 1,000 days. Same folds as Jean's and Quentin's runs |
-| Validation | the last year before each fold's first test day: selects the hyperparameters by QLIKE and gives sigma2 |
+| Validation | the last **two** years before each fold's first test day, walk-forward as in `econometrics/tuning.py`: each candidate is fitted on everything before a validation year and forecasts it; the lowest QLIKE over both years wins. The same errors give sigma2. `--tune-years 1` keeps only the last year, as in the DL branch |
 | Variance forecast | `h = exp(log forecast + sigma2 / 2)`, sigma2 = variance of the validation log errors, same rule for every model (as in the DL branch) |
 | Main loss | QLIKE on `rv5`; also MSE on `log(rv5)` and on `rv5`. **Lower is better** |
 | Tests | Diebold-Mariano against `logHAR-MJ` and 90 % Model Confidence Set, on the daily loss averaged across assets |
@@ -29,7 +29,7 @@ Each model is run on three feature sets, to separate the effect of the *model* f
 | `har_ext` | `har` + `x_pos`, `x_neg` (good and bad semivariance), `jump_share`, `log_rq` (realized quarticity) |
 | `har_mkt` | `har_ext` + `m_day`, `m_week`: market-wide log RV of the asset class |
 
-| Model | Description | Hyperparameters (chosen on the validation year) |
+| Model | Description | Hyperparameters (chosen on the validation years) |
 |---|---|---|
 | `logHAR-MJ` | the group benchmark: OLS on `x_day`, `x_week`, `x_month`, `m_day`, `m_week`, `jump_share` | none |
 | `RW` | tomorrow = today | none |
@@ -60,9 +60,10 @@ python -m linear_ml.run --dataset stocks --split rolling
 python -m linear_ml.run --dataset futures --pooling per_asset
 python -m linear_ml.run --dataset combined                    # the three files as one panel
 python -m linear_ml.run --dataset forex --models Lasso kNN-change --feature-sets har har_mkt
+python -m linear_ml.run --dataset forex --tune-years 1        # one validation year (robustness)
 ```
 
-## Output (`results/linear_ml/<dataset>/<split>[_per_asset]/`)
+## Output (`results/linear_ml/<dataset>/<split>[_per_asset][_tune1]/`)
 
 | File | Content |
 |---|---|
@@ -72,6 +73,10 @@ python -m linear_ml.run --dataset forex --models Lasso kNN-change --feature-sets
 | `forecasts.csv.gz` | every log forecast; not versioned |
 
 In `vs_benchmark_pct`, negative means better than `logHAR-MJ`. A negative DM statistic with a p-value under 0.05 means significantly better on QLIKE.
+
+## Why two validation years
+
+With one validation year, the 2019 cutoff tunes on 2018, a calm year for FX after a much more volatile training period. Heavily shrunk, nearly constant forecasts scored best on that one year (QLIKE penalizes over-prediction less than under-prediction), so lasso picked the largest penalty in its grid and ridge one of the largest. Those forecasts then failed from 2019 onward: ridge and lasso ended 5–23 % worse than `logHAR-MJ` on FX, while OLS on the same features was the best model. The problem is visible in the validation data alone (the selected penalty sits at the edge of the grid, driven by a single year), and two validation years is the rule of `econometrics/tuning.py`, the closest analogue in the project. The change applies to every dataset and split; the one-year runs are kept as a robustness check (`--tune-years 1`, folders ending in `_tune1`).
 
 ## Results
 
