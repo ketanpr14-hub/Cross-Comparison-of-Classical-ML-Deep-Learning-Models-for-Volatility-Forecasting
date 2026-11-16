@@ -1,13 +1,24 @@
-Data/
+# Data: never commit (put the VOLARE folders under data/)
 data/
-*.csv
-*.zip
+Data/
 *.parquet
+*.zip
+
+# Forecast files: large, derived from the data, rebuilt by each branch's scripts
+forecasts*.csv.gz
 results/forecasts/
 results/tables/
+
+# Python / Jupyter clutter
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
 .venv/
-*.code-workspace
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
 .vscode/
+*.code-workspace
