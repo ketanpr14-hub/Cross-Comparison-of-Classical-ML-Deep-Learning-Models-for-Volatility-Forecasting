@@ -50,6 +50,9 @@ mkdir -p logs
 sbatch src/dl/dce_job.sh fixed
 sbatch src/dl/dce_job.sh expanding
 squeue -u $USER                               # empty = finished
+
+sbatch src/dl/dce_job.sh rolling              # 2nd argument = dataset: forex, futures
+python src/dl/dm_tests.py                     # after the runs: DM tests against both HAR baselines
 ```
 
 ## Output (`results/dl/`)
@@ -58,6 +61,7 @@ squeue -u $USER                               # empty = finished
 |---|---|
 | `stocks_<split>.csv` | one line per model and cutoff: `n_forecasts`, `QLIKE`, `MSE log RV`, `MSE RV`, DM statistic and p-value against pooled HAR, and the difference from pooled HAR in % |
 | `stocks_<split>_by_year.csv` | the same losses for each test year |
+| `dm_tests.csv` | from `dm_tests.py`: every model against pooled HAR and per-asset HAR, on QLIKE and on MSE log RV |
 | `forecasts_stocks_<split>.csv.gz` | every forecast (not versioned, rebuilt by the script) |
 
 In the `vs HAR (%)` columns, negative means better than pooled HAR. A negative DM statistic
@@ -91,5 +95,6 @@ noisier than MSE on `log(rv5)`. Forex and futures have not been run yet.
 |---|---|
 | `src/dl/run_dl.py` | the pipeline: data, folds, baselines, MLP, LSTM, scores, CSVs |
 | `src/dl/dce_job.sh` | batch job for the DCE cluster |
+| `src/dl/dm_tests.py` | extra DM tests from the saved forecasts |
 | `src/dl/stocks_har_mlp.py` | first script: HAR against several MLP sizes on the cleaned data |
 | `notebooks/03_lstm.ipynb`, `04_lstm_grid.ipynb` | step-by-step LSTM, then the cutoff x window grid |
