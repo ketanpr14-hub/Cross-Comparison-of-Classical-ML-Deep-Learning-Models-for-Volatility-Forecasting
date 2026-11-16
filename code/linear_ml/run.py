@@ -185,7 +185,25 @@ def score(test, logf, h, reps):
         "dm_vs_benchmark": {m: d[0] for m, d in dm.items()},
         "dm_pvalue": {m: d[1] for m, d in dm.items()},
     })
-    return table.join(ev.model_confidence_set(daily, reps=reps)).sort_values("qlike")
+    return table.join(mcs_with_duplicates(daily, reps)).sort_values("qlike")
+
+
+def mcs_with_duplicates(daily, reps):
+    """
+    Model Confidence Set when some models have exactly the same daily losses (e.g. a lasso
+    that drops every extra feature and so equals the smaller feature set). Their loss
+    difference is zero every day, its variance is zero, and the MCS statistic is 0/0. The
+    test is run on one model of each identical group, and the others get its result.
+    """
+    key = daily.round(10).T.apply(tuple, axis=1)          # one tuple of daily losses per model
+    first = key.groupby(key, sort=False).transform(lambda s: s.index[0])
+    groups = first[first != first.index]
+    if len(groups):
+        print("identical daily losses, MCS run once per group: "
+              + "; ".join(f"{m} = {f}" for m, f in groups.items()))
+    unique = list(dict.fromkeys(first))
+    mcs = ev.model_confidence_set(daily[unique], reps=reps)
+    return mcs.reindex(first.to_numpy()).set_axis(first.index)
 
 
 # ------------------------------------------------------------------ main
