@@ -10,9 +10,9 @@
 # Before the first run, once:   python src/dl/run_dl.py --quick     (1 to 2 min, checks the setup)
 #
 #SBATCH --job-name=dl-vol
-#SBATCH --partition=CHANGE_ME        # replace with a batch partition from `sinfo`
+#SBATCH --partition=cpu_prod         # 12 h limit; `sinfo` lists the others
 #SBATCH --cpus-per-task=8
-#SBATCH --time=06:00:00              # expanding is about 3x longer than fixed: raise it if needed
+#SBATCH --time=12:00:00
 #SBATCH --output=logs/dl-%j.out
 
 SPLIT=${1:-fixed}
